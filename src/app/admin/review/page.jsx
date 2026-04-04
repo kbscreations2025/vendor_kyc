@@ -14,7 +14,7 @@ export default async function ReviewPage() {
   if (fetchError) {
     return (
       <>
-        <div className="page-header">
+        <div className="page-header" style={{ position: 'static', marginTop: 0, paddingTop: 0 }}>
           <h1>Review KYC Submissions</h1>
           <p>Review, approve, or reject vendor KYC submissions</p>
         </div>
@@ -29,13 +29,13 @@ export default async function ReviewPage() {
   }
 
   return (
-    <>
-      <div className="page-header">
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', overflow: 'hidden' }}>
+      <div className="page-header" style={{ position: 'static', marginTop: 0, paddingTop: 0, flexShrink: 0 }}>
         <h1>Review KYC Submissions</h1>
         <p>Review, approve, or reject vendor KYC submissions</p>
       </div>
 
       <ReviewClient submissions={submissions} />
-    </>
+    </div>
   );
 }

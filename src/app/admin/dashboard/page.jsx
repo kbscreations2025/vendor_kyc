@@ -18,7 +18,7 @@ export default async function Dashboard() {
   if (fetchError) {
     return (
       <>
-        <div className="page-header">
+        <div className="page-header" style={{ position: 'static', marginTop: 0, paddingTop: 0 }}>
           <h1>Dashboard</h1>
           <p>Overview of vendor KYC submissions and link status</p>
         </div>
@@ -37,8 +37,8 @@ export default async function Dashboard() {
   );
 
   return (
-    <>
-      <div className="page-header">
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', overflow: 'hidden' }}>
+      <div className="page-header" style={{ position: 'static', marginTop: 0, paddingTop: 0, flexShrink: 0 }}>
         <h1>Dashboard</h1>
         <p>Overview of vendor KYC submissions and link status</p>
       </div>
@@ -47,6 +47,6 @@ export default async function Dashboard() {
         submissions={recentSubmissions}
         totalLinks={links.length}
       />
-    </>
+    </div>
   );
 }

@@ -7,8 +7,7 @@ import * as XLSX from 'xlsx';
 
 export default function GenerateLink() {
   const { addLinks, links, loaded } = useKyc();
-  const [activeTab, setActiveTab] = useState('single');
-  const [panInput, setPanInput] = useState('');
+  const [activeTab, setActiveTab] = useState('multiple');
   const [multiPanInput, setMultiPanInput] = useState('');
   const [errors, setErrors] = useState([]);
   const [toast, setToast] = useState('');
@@ -29,18 +28,11 @@ export default function GenerateLink() {
       ['BCDEF2345G'],
     ];
     const ws = XLSX.utils.aoa_to_sheet(templateData);
-
-    // Column widths
-    ws['!cols'] = [
-      { wch: 18 },
-      { wch: 30 },
-      { wch: 35 },
-    ];
+    ws['!cols'] = [{ wch: 18 }];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'PAN_Numbers');
 
-    // Add an instructions sheet
     const instrData = [
       ['KBS Vendor KYC - PAN Upload Template Instructions'],
       [''],
@@ -48,10 +40,8 @@ export default function GenerateLink() {
       ['2. Enter valid PAN numbers in Column A (first column)'],
       ['3. PAN format: 5 letters + 4 digits + 1 letter (e.g. ABCDE1234F)'],
       ['4. Row 1 is the header row - do not modify it'],
-      ['5. Delete the example rows (rows 2 & 3) before entering your data'],
-      ['6. The "Vendor Name" and "Notes" columns are optional and for your reference only'],
-      ['7. Only Column A (PAN Number) will be read during upload'],
-      ['8. Save the file and upload it in the "Excel Upload" tab'],
+      ['5. Delete the example rows before entering your data'],
+      ['6. Save the file and upload it in the "Excel Upload" tab'],
       [''],
       ['Note: Each PAN will generate a unique encrypted link valid for 4 days.'],
     ];
@@ -64,44 +54,8 @@ export default function GenerateLink() {
   };
 
   const getBaseUrl = () => {
-    if (typeof window !== 'undefined') {
-      return window.location.origin;
-    }
+    if (typeof window !== 'undefined') return window.location.origin;
     return '';
-  };
-
-  const handleSingleAdd = async () => {
-    setErrors([]);
-    const pan = panInput.toUpperCase().trim();
-    if (!pan) {
-      setErrors(['Please enter a PAN number']);
-      return;
-    }
-    if (!validatePAN(pan)) {
-      setErrors(['Invalid PAN format. Expected: ABCDE1234F']);
-      return;
-    }
-    const activeLink = links.find((l) => l.pan === pan && l.status !== 'submitted' && !isExpired(l.expiresAt));
-    if (activeLink) {
-      setErrors(['An active link already exists for this PAN']);
-      return;
-    }
-    const link = generateEncryptedLink(pan, getBaseUrl());
-    try {
-      await addLinks([
-        {
-          pan,
-          link,
-          createdAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
-          status: 'active',
-        },
-      ]);
-      setPanInput('');
-      showToast('Link generated successfully!');
-    } catch (err) {
-      setErrors([`Failed to generate link: ${err.message}`]);
-    }
   };
 
   const handleMultipleAdd = async () => {
@@ -170,7 +124,7 @@ export default function GenerateLink() {
 
         data.forEach((row, i) => {
           const cell = (row[0] || '').toString().toUpperCase().trim();
-          if (!cell || i === 0) return; // skip header
+          if (!cell || i === 0) return;
           if (!validatePAN(cell)) {
             errs.push(`Row ${i + 1}: "${cell}" is not a valid PAN`);
           } else if (links.find((l) => l.pan === cell && l.status !== 'submitted' && !isExpired(l.expiresAt))) {
@@ -182,9 +136,7 @@ export default function GenerateLink() {
           }
         });
 
-        if (errs.length > 0) {
-          setErrors(errs);
-        }
+        if (errs.length > 0) setErrors(errs);
 
         if (pans.length > 0) {
           const newLinks = pans.map((pan) => ({
@@ -216,20 +168,14 @@ export default function GenerateLink() {
   if (!loaded) return <p>Loading...</p>;
 
   return (
-    <>
-      <div className="page-header">
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', overflow: 'hidden' }}>
+      <div className="page-header" style={{ position: 'static', marginTop: 0, paddingTop: 0, flexShrink: 0, marginBottom: '8px' }}>
         <h1>Generate Vendor Links</h1>
-        <p>Create encrypted KYC form links for vendors using their PAN numbers</p>
       </div>
 
-      <div className="card" style={{ marginBottom: '24px' }}>
+      {/* Input Panel — compact, no scroll */}
+      <div className="card" style={{ marginBottom: '10px', flexShrink: 0 }}>
         <div className="tabs">
-          <button
-            className={`tab ${activeTab === 'single' ? 'active' : ''}`}
-            onClick={() => { setActiveTab('single'); setErrors([]); }}
-          >
-            Single Input
-          </button>
           <button
             className={`tab ${activeTab === 'multiple' ? 'active' : ''}`}
             onClick={() => { setActiveTab('multiple'); setErrors([]); }}
@@ -244,87 +190,43 @@ export default function GenerateLink() {
           </button>
         </div>
 
-        {activeTab === 'single' && (
-          <div>
-            <div className="form-group">
-              <label>PAN Number <span className="required">*</span></label>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <input
-                  className={`form-control ${errors.length ? 'error' : ''}`}
-                  value={panInput}
-                  onChange={(e) => setPanInput(e.target.value.toUpperCase())}
-                  placeholder="e.g. ABCDE1234F"
-                  maxLength={10}
-                  style={{ maxWidth: '300px' }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSingleAdd()}
-                />
-                <button className="btn btn-primary" onClick={handleSingleAdd}>
-                  Generate Link
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {activeTab === 'multiple' && (
-          <div>
-            <div className="form-group">
-              <label>PAN Numbers (one per line or comma-separated) <span className="required">*</span></label>
-              <textarea
-                className={`form-control ${errors.length ? 'error' : ''}`}
-                value={multiPanInput}
-                onChange={(e) => setMultiPanInput(e.target.value.toUpperCase())}
-                placeholder={"ABCDE1234F\nBCDEF2345G\nCDEFG3456H"}
-                rows={5}
-              />
-            </div>
-            <button className="btn btn-primary" onClick={handleMultipleAdd}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+            <textarea
+              className={`form-control ${errors.length ? 'error' : ''}`}
+              value={multiPanInput}
+              onChange={(e) => setMultiPanInput(e.target.value.toUpperCase())}
+              placeholder={"ABCDE1234F, BCDEF2345G, CDEFG3456H (comma or newline separated)"}
+              rows={2}
+              style={{ flex: 1, resize: 'vertical', minHeight: '50px', maxHeight: '120px' }}
+            />
+            <button className="btn btn-primary" onClick={handleMultipleAdd} style={{ whiteSpace: 'nowrap', alignSelf: 'flex-end' }}>
               Generate Links
             </button>
           </div>
         )}
 
         {activeTab === 'excel' && (
-          <div>
-            <p style={{ fontSize: '14px', color: 'var(--gray-600)', marginBottom: '16px' }}>
-              Upload an Excel file (.xlsx, .xls) with PAN numbers in the first column. First row is treated as header.
-            </p>
-
-            <div style={{ marginBottom: '20px', padding: '16px', background: 'var(--primary-light)', borderRadius: 'var(--radius)', border: '1px solid var(--primary)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-                <div>
-                  <p style={{ fontSize: '14px', fontWeight: '600', color: 'var(--gray-900)' }}>Step 1: Download Template</p>
-                  <p style={{ fontSize: '13px', color: 'var(--gray-600)', marginTop: '2px' }}>
-                    Download the Excel template, fill in PAN numbers, then upload.
-                  </p>
-                </div>
-                <button className="btn btn-primary btn-sm" onClick={downloadTemplate}>
-                  📥 Download Template
-                </button>
-              </div>
-            </div>
-
-            <p style={{ fontSize: '14px', fontWeight: '600', color: 'var(--gray-900)', marginBottom: '8px' }}>Step 2: Upload Filled Template</p>
-            <div
-              className="upload-zone"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <p style={{ fontSize: '32px', marginBottom: '8px' }}>📄</p>
-              <p><strong>Click to upload filled Excel template</strong></p>
-              <p style={{ fontSize: '12px', marginTop: '4px' }}>Supports .xlsx and .xls files</p>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleExcelUpload}
-              style={{ display: 'none' }}
-            />
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="btn btn-sm btn-outline" onClick={downloadTemplate} style={{ whiteSpace: 'nowrap' }}>
+              Download Template
+            </button>
+            <label className="btn btn-sm btn-primary" style={{ whiteSpace: 'nowrap', cursor: 'pointer', margin: 0 }}>
+              Upload Excel
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleExcelUpload}
+                style={{ display: 'none' }}
+              />
+            </label>
+            <span style={{ fontSize: '12px', color: 'var(--gray-500)' }}>Download template, fill PAN numbers in Column A, then upload (.xlsx, .xls)</span>
           </div>
         )}
 
         {errors.length > 0 && (
-          <div style={{ marginTop: '12px' }}>
+          <div style={{ marginTop: '8px', maxHeight: '60px', overflowY: 'auto' }}>
             {errors.map((err, i) => (
               <p key={i} className="error-text">{err}</p>
             ))}
@@ -332,8 +234,9 @@ export default function GenerateLink() {
         )}
       </div>
 
-      <div className="card">
-        <div className="card-header">
+      {/* Generated Links Table — fills remaining height */}
+      <div className="card" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="card-header" style={{ flexShrink: 0 }}>
           <h2>Generated Links ({links.length})</h2>
         </div>
         {links.length === 0 ? (
@@ -341,7 +244,7 @@ export default function GenerateLink() {
             No links generated yet. Use the form above to create vendor KYC links.
           </p>
         ) : (
-          <div className="table-wrapper">
+          <div className="table-wrapper" style={{ flex: 1, maxHeight: 'none' }}>
             <table>
               <thead>
                 <tr>
@@ -389,6 +292,6 @@ export default function GenerateLink() {
       </div>
 
       {toast && <div className="toast">{toast}</div>}
-    </>
+    </div>
   );
 }

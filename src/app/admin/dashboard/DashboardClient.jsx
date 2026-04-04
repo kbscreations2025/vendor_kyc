@@ -77,8 +77,8 @@ export default function DashboardClient({ submissions: serverSubmissions, totalL
   const rejectedCount = optimisticSubmissions.filter((s) => s.status === 'rejected').length;
 
   return (
-    <>
-      <div className="stats-grid">
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <div className="stats-grid" style={{ flexShrink: 0 }}>
         <div className="stat-card">
           <div className="stat-value">{totalLinks}</div>
           <div className="stat-label">Total Links Generated</div>
@@ -101,8 +101,8 @@ export default function DashboardClient({ submissions: serverSubmissions, totalL
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-header">
+      <div className="card" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="card-header" style={{ flexShrink: 0 }}>
           <h2>
             Recent KYC Submissions
             {isPending && <span style={{ fontSize: '13px', color: 'var(--gray-400)', fontWeight: '400', marginLeft: '10px' }}>Updating...</span>}
@@ -113,7 +113,7 @@ export default function DashboardClient({ submissions: serverSubmissions, totalL
             No submissions yet. Generate links and share with vendors to get started.
           </p>
         ) : (
-          <div className="table-wrapper">
+          <div className="table-wrapper" style={{ flex: 1, maxHeight: 'none' }}>
             <table>
               <thead>
                 <tr>
@@ -249,18 +249,26 @@ export default function DashboardClient({ submissions: serverSubmissions, totalL
               </div>
             </div>
             <div className="modal-footer">
-              <button className="btn btn-danger" onClick={() => handleAction('rejected')}>
-                Reject
-              </button>
-              <button className="btn btn-success" onClick={() => handleAction('approved')}>
-                Approve
-              </button>
+              {selectedSubmission.status === 'approved' ? (
+                <span style={{ padding: '8px 16px', background: 'var(--success-light)', color: 'var(--success)', borderRadius: 'var(--radius)', fontSize: '13px', fontWeight: '600' }}>
+                  This vendor is approved and cannot be changed
+                </span>
+              ) : (
+                <>
+                  <button className="btn btn-danger" onClick={() => handleAction('rejected')}>
+                    Reject
+                  </button>
+                  <button className="btn btn-success" onClick={() => handleAction('approved')}>
+                    Approve
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
 
       <Toast toast={toast} onClose={clearToast} />
-    </>
+    </div>
   );
 }

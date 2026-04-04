@@ -6,15 +6,11 @@ import { decryptAndValidateToken } from '@/lib/encryption';
 import { useKyc } from '@/context/KycContext';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/formCache';
 
-// Dropdown types for additional documents (URD Letter & MSME Declaration handled separately)
+// Dropdown types for additional documents (required docs have their own upload section)
 const ATTACHMENT_TYPES = [
-  'PAN Card',
   'Aadhaar Card',
-  'GST Certificate',
-  'MSME Certificate',
   'Cancelled Cheque',
   'Bank Statement',
-  'LUT Certificate',
   'Incorporation Certificate',
   'Other',
 ];
@@ -44,6 +40,26 @@ function isValidTAN(val) {
 function isOnlyDigits(val) {
   return /^[0-9]+$/.test(val.trim());
 }
+function isAlphanumeric(val) {
+  return /^[A-Za-z0-9\s]+$/.test(val.trim());
+}
+function isValidMSME(val) {
+  return /^[A-Za-z0-9-]{1,19}$/.test(val.trim());
+}
+// Generate financial year options (current + past 2 years)
+function getFinancialYears() {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const month = now.getMonth(); // 0-indexed
+  // Financial year starts April. If Jan-Mar, current FY started previous year.
+  const fyStart = month >= 3 ? currentYear : currentYear - 1;
+  const years = [];
+  for (let i = 0; i < 3; i++) {
+    const start = fyStart - i;
+    years.push(`${start}-${String(start + 1).slice(2)}`);
+  }
+  return years;
+}
 
 function FormContent() {
   const searchParams = useSearchParams();
@@ -62,7 +78,6 @@ function FormContent() {
   const [errors, setErrors] = useState({});
 
   const [form, setForm] = useState({
-    vendorName: '',
     legalName: '',
     tradeName: '',
     address: '',
@@ -76,10 +91,12 @@ function FormContent() {
     tan: '',
     gstNo: '',
     gstNotRegistered: false,
+    goodsSent: false,
     lutNo: '',
-    year: '',
+    lutYear: '',
     msmeNo: '',
     msmeCategory: '',
+    msmeYear: '',
     msmeNotRegistered: false,
     bankName: '',
     bankAccountNo: '',
@@ -123,6 +140,9 @@ function FormContent() {
   }, [form, tokenData]);
 
   useEffect(() => {
+    // Skip re-checking after we've already submitted successfully in this session
+    if (submitted || tokenData) return;
+
     if (!token) {
       setTokenError('No access token. Please use the link provided by KBS admin.');
       return;
@@ -144,7 +164,8 @@ function FormContent() {
         setForm((prev) => ({ ...prev, pan: result.pan }));
       }
     }
-  }, [token, submissions]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, submissions.length]);
 
   const updateField = (field, value) => {
     setForm((prev) => {
@@ -153,14 +174,22 @@ function FormContent() {
       // When GST not registered is checked → clear GST fields
       if (field === 'gstNotRegistered' && value === true) {
         updated.gstNo = '';
+        updated.goodsSent = false;
         updated.lutNo = '';
-        updated.year = '';
+        updated.lutYear = '';
+      }
+
+      // When goods sent unchecked → clear LUT fields
+      if (field === 'goodsSent' && value === false) {
+        updated.lutNo = '';
+        updated.lutYear = '';
       }
 
       // When MSME not registered is checked → clear MSME fields
       if (field === 'msmeNotRegistered' && value === true) {
         updated.msmeNo = '';
         updated.msmeCategory = '';
+        updated.msmeYear = '';
       }
 
       return updated;
@@ -266,12 +295,18 @@ function FormContent() {
       { originalName: file.name, renamedName, type: docType, size: file.size, dataUrl, mimeType: file.type },
     ]);
 
-    // Clear error for this doc type
-    if (docType === 'URD Letter' && errors.urdLetter) {
-      setErrors((prev) => { const next = { ...prev }; delete next.urdLetter; return next; });
-    }
-    if (docType === 'MSME Declaration' && errors.msmeDeclaration) {
-      setErrors((prev) => { const next = { ...prev }; delete next.msmeDeclaration; return next; });
+    // Clear related error
+    const errorKeyMap = {
+      'URD Letter': 'urdLetter',
+      'MSME Declaration': 'msmeDeclaration',
+      'PAN Card': 'attPan',
+      'GST Certificate': 'attGst',
+      'MSME Certificate': 'attMsme',
+      'LUT Certificate': 'attLut',
+    };
+    const errKey = errorKeyMap[docType];
+    if (errKey && errors[errKey]) {
+      setErrors((prev) => { const next = { ...prev }; delete next[errKey]; return next; });
     }
 
     e.target.value = '';
@@ -281,12 +316,7 @@ function FormContent() {
     const errs = {};
 
     // ── Basic Information ──
-    if (!form.vendorName.trim()) errs.vendorName = 'Vendor Name is required';
-    else if (!isOnlyLettersSpaces(form.vendorName.trim())) errs.vendorName = 'Vendor Name must contain only letters';
-
     if (!form.legalName.trim()) errs.legalName = 'Legal Name is required';
-    else if (!isOnlyLettersSpaces(form.legalName.trim())) errs.legalName = 'Legal Name must contain only letters';
-
     if (!form.tradeName.trim()) errs.tradeName = 'Trade Name is required';
 
     // ── Address ──
@@ -301,8 +331,6 @@ function FormContent() {
 
     if (!form.pinCode.trim()) errs.pinCode = 'PIN Code is required';
     else if (!isValidPIN(form.pinCode)) errs.pinCode = 'Enter valid 6-digit PIN code';
-
-    if (!form.activity) errs.activity = 'Activity is required';
 
     // ── Contact ──
     if (!form.contactPerson.trim()) errs.contactPerson = 'Contact Person Name is required';
@@ -323,27 +351,58 @@ function FormContent() {
     // ── GST (conditional) ──
     if (!form.gstNotRegistered) {
       if (!form.gstNo.trim()) errs.gstNo = 'GST No. is required (or mark as not registered)';
-      else if (!isValidGST(form.gstNo)) errs.gstNo = 'Enter valid 15-digit GST number';
+      else if (!isValidGST(form.gstNo)) errs.gstNo = 'Enter valid 15-digit GST number (no special characters)';
 
-      if (!form.lutNo.trim()) errs.lutNo = 'LUT No. is required';
-      if (!form.year.trim()) errs.year = 'Year is required';
+      // LUT is conditional on "Goods Sent" checkbox
+      if (form.goodsSent) {
+        if (!form.lutNo.trim()) errs.lutNo = 'LUT No. is required when goods are sent';
+        if (!form.lutYear) errs.lutYear = 'LUT Year is required';
+      }
     } else {
-      // URD Letter attachment required when GST not registered
       const hasUrdLetter = attachments.some((a) => a.type === 'URD Letter');
       if (!hasUrdLetter) {
         errs.urdLetter = 'URD Letter attachment is required when GST is not registered. Please download the template, fill it, and upload.';
       }
     }
 
-    // ── MSME (conditional) ──
+    // ── MSME ──
+    if (!form.activity) errs.activity = 'Activity is required';
+
     if (!form.msmeNotRegistered) {
       if (!form.msmeNo.trim()) errs.msmeNo = 'MSME No. is required (or mark as not registered)';
+      else if (!isValidMSME(form.msmeNo)) errs.msmeNo = 'MSME No. must be max 19 characters (letters, numbers, hyphens only)';
       if (!form.msmeCategory) errs.msmeCategory = 'MSME Category is required';
+      if (!form.msmeYear) errs.msmeYear = 'MSME Year is required';
     } else {
-      // MSME Declaration attachment required when not registered
       const hasMsmeDeclaration = attachments.some((a) => a.type === 'MSME Declaration');
       if (!hasMsmeDeclaration) {
         errs.msmeDeclaration = 'MSME Declaration attachment is required when MSME is not registered. Please download the template, fill it, and upload.';
+      }
+    }
+
+    // ── Required Attachments based on filled fields ──
+    // PAN is always required → PAN Card attachment mandatory
+    if (form.pan.trim()) {
+      if (!attachments.some((a) => a.type === 'PAN Card')) {
+        errs.attPan = 'PAN Card attachment is required';
+      }
+    }
+    // GST filled → GST Certificate required
+    if (!form.gstNotRegistered && form.gstNo.trim()) {
+      if (!attachments.some((a) => a.type === 'GST Certificate')) {
+        errs.attGst = 'GST Certificate attachment is required';
+      }
+    }
+    // MSME filled → MSME Certificate required
+    if (!form.msmeNotRegistered && form.msmeNo.trim()) {
+      if (!attachments.some((a) => a.type === 'MSME Certificate')) {
+        errs.attMsme = 'MSME Certificate attachment is required';
+      }
+    }
+    // LUT filled → LUT Certificate required
+    if (!form.gstNotRegistered && form.goodsSent && form.lutNo.trim()) {
+      if (!attachments.some((a) => a.type === 'LUT Certificate')) {
+        errs.attLut = 'LUT Certificate attachment is required';
       }
     }
 
@@ -372,9 +431,11 @@ function FormContent() {
     try {
       const submission = {
         ...form,
+        vendorName: form.tradeName.trim() || form.legalName.trim(),
         pan: form.pan.toUpperCase().trim(),
         tan: form.tan.toUpperCase().trim(),
         gstNo: form.gstNo.toUpperCase().trim(),
+        msmeNo: form.msmeNo.toUpperCase().trim(),
         ifscCode: form.ifscCode.toUpperCase().trim(),
         attachments: attachments.map(({ originalName, renamedName, type, size, dataUrl, mimeType }) => ({
           originalName,
@@ -547,9 +608,8 @@ function FormContent() {
           <div className="form-section">
             <h3>Basic Information</h3>
             <div className="form-grid">
-              {renderField('Vendor Name', 'vendorName', { required: true, placeholder: 'Enter vendor name', onChangeOverride: (e) => handleTextInput('vendorName', e.target.value) })}
-              {renderField('Legal Name', 'legalName', { required: true, placeholder: 'Enter legal name', onChangeOverride: (e) => handleTextInput('legalName', e.target.value) })}
-              {renderField('Trade Name', 'tradeName', { required: true, placeholder: 'Enter trade name' })}
+              {renderField('Legal Name', 'legalName', { required: true, placeholder: 'Enter legal name of the business' })}
+              {renderField('Trade Name', 'tradeName', { required: true, placeholder: 'Enter trade / brand name' })}
             </div>
           </div>
 
@@ -570,20 +630,6 @@ function FormContent() {
               {renderField('City', 'city', { required: true, placeholder: 'Enter city', onChangeOverride: (e) => handleTextInput('city', e.target.value) })}
               {renderField('District', 'district', { required: true, placeholder: 'Enter district', onChangeOverride: (e) => handleTextInput('district', e.target.value) })}
               {renderField('PIN Code', 'pinCode', { required: true, placeholder: 'Enter 6-digit PIN', maxLength: 6, inputMode: 'numeric', onChangeOverride: (e) => handleNumberInput('pinCode', e.target.value, 6) })}
-              <div className="form-group">
-                <label>Activity (Manufacturing/Service/Trading) <span className="required">*</span></label>
-                <select
-                  className={`form-control ${errors.activity ? 'error' : ''}`}
-                  value={form.activity}
-                  onChange={(e) => updateField('activity', e.target.value)}
-                >
-                  <option value="">Select Activity</option>
-                  <option value="Manufacturing">Manufacturing</option>
-                  <option value="Service">Service</option>
-                  <option value="Trading">Trading</option>
-                </select>
-                {errors.activity && <p className="error-text">{errors.activity}</p>}
-              </div>
             </div>
           </div>
 
@@ -623,16 +669,61 @@ function FormContent() {
                 </p>
               </div>
             ) : (
-              <div className="form-grid">
-                {renderField('GST No.', 'gstNo', { required: true, placeholder: 'Enter 15-digit GST number', maxLength: 15, onChangeOverride: (e) => updateField('gstNo', e.target.value.toUpperCase()) })}
-                {renderField('LUT No.', 'lutNo', { required: true, placeholder: 'Enter LUT number' })}
-                {renderField('Year', 'year', { required: true, placeholder: 'Enter year (e.g. 2024-25)' })}
-              </div>
+              <>
+                <div className="form-grid">
+                  {renderField('GST No.', 'gstNo', { required: true, placeholder: 'Enter 15-digit GST number', maxLength: 15, onChangeOverride: (e) => updateField('gstNo', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')) })}
+                </div>
+                <div className="form-group" style={{ marginTop: '12px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={form.goodsSent}
+                      onChange={(e) => updateField('goodsSent', e.target.checked)}
+                    />
+                    Is Goods Sent (LUT applicable)
+                  </label>
+                </div>
+                {form.goodsSent && (
+                  <div className="form-grid" style={{ marginTop: '12px' }}>
+                    {renderField('LUT No.', 'lutNo', { required: true, placeholder: 'Enter LUT number' })}
+                    <div className="form-group">
+                      <label>LUT Year <span className="required">*</span></label>
+                      <select
+                        className={`form-control ${errors.lutYear ? 'error' : ''}`}
+                        value={form.lutYear}
+                        onChange={(e) => updateField('lutYear', e.target.value)}
+                      >
+                        <option value="">Select Financial Year</option>
+                        {getFinancialYears().map((fy) => (
+                          <option key={fy} value={fy}>{fy}</option>
+                        ))}
+                      </select>
+                      {errors.lutYear && <p className="error-text">{errors.lutYear}</p>}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
           <div className="form-section">
             <h3>MSME Details</h3>
+            <div className="form-grid" style={{ marginBottom: '16px' }}>
+              <div className="form-group">
+                <label>Activity (Manufacturing/Service/Trading) <span className="required">*</span></label>
+                <select
+                  className={`form-control ${errors.activity ? 'error' : ''}`}
+                  value={form.activity}
+                  onChange={(e) => updateField('activity', e.target.value)}
+                >
+                  <option value="">Select Activity</option>
+                  <option value="Manufacturing">Manufacturing</option>
+                  <option value="Service">Service</option>
+                  <option value="Trading">Trading</option>
+                </select>
+                {errors.activity && <p className="error-text">{errors.activity}</p>}
+              </div>
+            </div>
             <div className="form-group" style={{ marginBottom: '16px' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                 <input
@@ -651,7 +742,7 @@ function FormContent() {
               </div>
             ) : (
               <div className="form-grid">
-                {renderField('MSME Registration No.', 'msmeNo', { required: true, placeholder: 'Enter MSME registration number' })}
+                {renderField('MSME Registration No.', 'msmeNo', { required: true, placeholder: 'e.g. UDYAM-XX-00-0000000', maxLength: 19, onChangeOverride: (e) => updateField('msmeNo', e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '')) })}
                 <div className="form-group">
                   <label>Category (Micro/Small/Medium) <span className="required">*</span></label>
                   <select
@@ -665,6 +756,20 @@ function FormContent() {
                     <option value="Medium">Medium</option>
                   </select>
                   {errors.msmeCategory && <p className="error-text">{errors.msmeCategory}</p>}
+                </div>
+                <div className="form-group">
+                  <label>MSME Year <span className="required">*</span></label>
+                  <select
+                    className={`form-control ${errors.msmeYear ? 'error' : ''}`}
+                    value={form.msmeYear}
+                    onChange={(e) => updateField('msmeYear', e.target.value)}
+                  >
+                    <option value="">Select Financial Year</option>
+                    {getFinancialYears().map((fy) => (
+                      <option key={fy} value={fy}>{fy}</option>
+                    ))}
+                  </select>
+                  {errors.msmeYear && <p className="error-text">{errors.msmeYear}</p>}
                 </div>
               </div>
             )}
@@ -680,159 +785,118 @@ function FormContent() {
           </div>
         </div>
 
-        {/* ── Required Documents (conditional) ── */}
-        {(form.gstNotRegistered || form.msmeNotRegistered) && (
-          <div className="card" style={{ marginBottom: '24px', border: '2px solid var(--warning)' }}>
-            <div className="form-section">
-              <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ color: 'var(--danger)' }}>*</span> Required Documents
-              </h3>
-              <p style={{ fontSize: '13px', color: 'var(--gray-600)', marginBottom: '20px' }}>
-                Based on your selections above, the following documents are <strong>mandatory</strong>. Download the template, fill it, sign it, and upload.
-              </p>
+        {/* ── Required Document Uploads ── */}
+        {(() => {
+          // Determine which required docs are needed based on form values
+          const REQUIRED_DOCS = [];
 
-              {/* URD Letter Required */}
-              {form.gstNotRegistered && (() => {
-                const uploaded = attachments.find((a) => a.type === 'URD Letter');
-                return (
-                  <div style={{
-                    padding: '20px',
-                    background: uploaded ? 'var(--success-light)' : 'var(--warning-light)',
-                    borderRadius: 'var(--radius)',
-                    border: `1px solid ${uploaded ? 'var(--success)' : 'var(--warning)'}`,
-                    marginBottom: form.msmeNotRegistered ? '16px' : '0',
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-                      <div style={{ flex: 1, minWidth: '200px' }}>
-                        <h4 style={{ fontSize: '15px', margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {uploaded ? '✅' : '⚠️'} URD Letter (Unregistered Dealer)
-                        </h4>
-                        <p style={{ fontSize: '13px', color: 'var(--gray-700)', margin: 0 }}>
-                          Required because you are not registered under GST. Download the template, fill it with your details, and upload the signed copy.
-                        </p>
-                        {uploaded && (
-                          <div style={{ marginTop: '10px', padding: '8px 12px', background: 'white', borderRadius: 'var(--radius)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-                            <span>📎</span>
-                            <strong>{uploaded.renamedName}</strong>
-                            <span style={{ color: 'var(--gray-500)' }}>({(uploaded.size / 1024).toFixed(1)} KB)</span>
-                            <button
-                              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '14px' }}
-                              onClick={() => setAttachments((prev) => prev.filter((a) => a.type !== 'URD Letter'))}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <a
-                          href="/templates/URD_Letter_Template.pdf"
-                          target="_blank"
-                          className="btn btn-sm btn-outline"
-                          style={{ whiteSpace: 'nowrap' }}
-                        >
-                          Download Template
-                        </a>
-                        {!uploaded && (
-                          <>
-                            <button
-                              className="btn btn-sm btn-primary"
-                              onClick={() => urdFileRef.current?.click()}
-                              style={{ whiteSpace: 'nowrap' }}
-                            >
-                              Upload URD Letter
-                            </button>
-                            <input
-                              ref={urdFileRef}
-                              type="file"
-                              onChange={(e) => handleRequiredDocUpload(e, 'URD Letter')}
-                              style={{ display: 'none' }}
-                              accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
-                            />
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    {errors.urdLetter && <p className="error-text" style={{ marginTop: '10px' }}>{errors.urdLetter}</p>}
-                  </div>
-                );
-              })()}
+          // PAN is always filled (pre-filled) → PAN Card always required
+          if (form.pan.trim()) {
+            REQUIRED_DOCS.push({ type: 'PAN Card', label: 'PAN Card Copy', reason: 'PAN number is provided', errorKey: 'attPan' });
+          }
 
-              {/* MSME Declaration Required */}
-              {form.msmeNotRegistered && (() => {
-                const uploaded = attachments.find((a) => a.type === 'MSME Declaration');
-                return (
-                  <div style={{
-                    padding: '20px',
-                    background: uploaded ? 'var(--success-light)' : 'var(--warning-light)',
-                    borderRadius: 'var(--radius)',
-                    border: `1px solid ${uploaded ? 'var(--success)' : 'var(--warning)'}`,
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-                      <div style={{ flex: 1, minWidth: '200px' }}>
-                        <h4 style={{ fontSize: '15px', margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {uploaded ? '✅' : '⚠️'} MSME Declaration
-                        </h4>
-                        <p style={{ fontSize: '13px', color: 'var(--gray-700)', margin: 0 }}>
-                          Required because you are not registered under MSME. Download the template, fill it with your details, and upload the signed copy.
-                        </p>
-                        {uploaded && (
-                          <div style={{ marginTop: '10px', padding: '8px 12px', background: 'white', borderRadius: 'var(--radius)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-                            <span>📎</span>
-                            <strong>{uploaded.renamedName}</strong>
-                            <span style={{ color: 'var(--gray-500)' }}>({(uploaded.size / 1024).toFixed(1)} KB)</span>
-                            <button
-                              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '14px' }}
-                              onClick={() => setAttachments((prev) => prev.filter((a) => a.type !== 'MSME Declaration'))}
-                            >
-                              Remove
-                            </button>
+          // GST filled → GST Certificate required
+          if (!form.gstNotRegistered && form.gstNo.trim()) {
+            REQUIRED_DOCS.push({ type: 'GST Certificate', label: 'GST Certificate', reason: 'GST number is provided', errorKey: 'attGst' });
+          }
+
+          // GST not registered → URD Letter required (with template)
+          if (form.gstNotRegistered) {
+            REQUIRED_DOCS.push({ type: 'URD Letter', label: 'URD Letter (Unregistered Dealer)', reason: 'Not registered under GST', errorKey: 'urdLetter', templateUrl: '/templates/URD_Letter_Template.pdf' });
+          }
+
+          // LUT filled → LUT Certificate required
+          if (!form.gstNotRegistered && form.goodsSent && form.lutNo.trim()) {
+            REQUIRED_DOCS.push({ type: 'LUT Certificate', label: 'LUT Certificate', reason: 'LUT number is provided', errorKey: 'attLut' });
+          }
+
+          // MSME filled → MSME Certificate required
+          if (!form.msmeNotRegistered && form.msmeNo.trim()) {
+            REQUIRED_DOCS.push({ type: 'MSME Certificate', label: 'MSME Certificate', reason: 'MSME number is provided', errorKey: 'attMsme' });
+          }
+
+          // MSME not registered → MSME Declaration required (with template)
+          if (form.msmeNotRegistered) {
+            REQUIRED_DOCS.push({ type: 'MSME Declaration', label: 'MSME Declaration', reason: 'Not registered under MSME', errorKey: 'msmeDeclaration', templateUrl: '/templates/MSME_Declaration_Template.pdf' });
+          }
+
+          if (REQUIRED_DOCS.length === 0) return null;
+
+          return (
+            <div className="card" style={{ marginBottom: '24px', border: '2px solid var(--primary)' }}>
+              <div className="form-section">
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ color: 'var(--danger)' }}>*</span> Required Documents
+                </h3>
+                <p style={{ fontSize: '13px', color: 'var(--gray-600)', marginBottom: '20px' }}>
+                  Based on the information you provided, the following documents are <strong>mandatory</strong>. Upload each one to proceed.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {REQUIRED_DOCS.map((doc) => {
+                    const uploaded = attachments.find((a) => a.type === doc.type);
+                    return (
+                      <div key={doc.type} style={{
+                        padding: '16px',
+                        background: uploaded ? 'var(--success-light)' : 'var(--gray-50)',
+                        borderRadius: 'var(--radius)',
+                        border: `1px solid ${uploaded ? 'var(--success)' : errors[doc.errorKey] ? 'var(--danger)' : 'var(--gray-200)'}`,
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                          <div style={{ flex: 1, minWidth: '180px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--gray-900)' }}>
+                              {uploaded ? '✅' : '📄'} {doc.label}
+                            </div>
+                            <p style={{ fontSize: '12px', color: 'var(--gray-500)', margin: '4px 0 0' }}>
+                              {doc.reason}
+                            </p>
+                            {uploaded && (
+                              <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--gray-600)' }}>
+                                <span>📎</span> {uploaded.renamedName} ({(uploaded.size / 1024).toFixed(1)} KB)
+                                <button
+                                  style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '12px', textDecoration: 'underline' }}
+                                  onClick={() => setAttachments((prev) => prev.filter((a) => a.type !== doc.type))}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            )}
                           </div>
-                        )}
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            {doc.templateUrl && (
+                              <a href={doc.templateUrl} target="_blank" className="btn btn-sm btn-outline" style={{ whiteSpace: 'nowrap' }}>
+                                Template
+                              </a>
+                            )}
+                            {!uploaded && (
+                              <label className="btn btn-sm btn-primary" style={{ whiteSpace: 'nowrap', cursor: 'pointer', margin: 0 }}>
+                                Upload
+                                <input
+                                  type="file"
+                                  onChange={(e) => handleRequiredDocUpload(e, doc.type)}
+                                  style={{ display: 'none' }}
+                                  accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                                />
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                        {errors[doc.errorKey] && <p className="error-text" style={{ marginTop: '8px' }}>{errors[doc.errorKey]}</p>}
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <a
-                          href="/templates/MSME_Declaration_Template.pdf"
-                          target="_blank"
-                          className="btn btn-sm btn-outline"
-                          style={{ whiteSpace: 'nowrap' }}
-                        >
-                          Download Template
-                        </a>
-                        {!uploaded && (
-                          <>
-                            <button
-                              className="btn btn-sm btn-primary"
-                              onClick={() => msmeFileRef.current?.click()}
-                              style={{ whiteSpace: 'nowrap' }}
-                            >
-                              Upload Declaration
-                            </button>
-                            <input
-                              ref={msmeFileRef}
-                              type="file"
-                              onChange={(e) => handleRequiredDocUpload(e, 'MSME Declaration')}
-                              style={{ display: 'none' }}
-                              accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
-                            />
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    {errors.msmeDeclaration && <p className="error-text" style={{ marginTop: '10px' }}>{errors.msmeDeclaration}</p>}
-                  </div>
-                );
-              })()}
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── Additional Documents ── */}
         <div className="card" style={{ marginBottom: '24px' }}>
           <div className="form-section">
             <h3>Additional Documents</h3>
             <p style={{ fontSize: '13px', color: 'var(--gray-600)', marginBottom: '16px' }}>
-              Upload supporting documents such as PAN Card, GST Certificate, Cancelled Cheque, etc. (max 5MB each).
+              Upload any other supporting documents (Aadhaar, Cancelled Cheque, Bank Statement, etc.). Max 5MB each.
             </p>
 
             <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -865,15 +929,18 @@ function FormContent() {
               </div>
             </div>
 
-            {attachments.filter((a) => a.type !== 'URD Letter' && a.type !== 'MSME Declaration').length === 0 ? (
-              <p style={{ color: 'var(--gray-500)', fontSize: '13px', padding: '20px', textAlign: 'center', background: 'var(--gray-50)', borderRadius: 'var(--radius)' }}>
-                No additional documents added yet.
-              </p>
-            ) : (
-              attachments
+            {(() => {
+              const REQUIRED_TYPES = ['PAN Card', 'GST Certificate', 'URD Letter', 'LUT Certificate', 'MSME Certificate', 'MSME Declaration'];
+              const additionalAtts = attachments
                 .map((att, i) => ({ att, originalIndex: i }))
-                .filter(({ att }) => att.type !== 'URD Letter' && att.type !== 'MSME Declaration')
-                .map(({ att, originalIndex }) => (
+                .filter(({ att }) => !REQUIRED_TYPES.includes(att.type));
+
+              return additionalAtts.length === 0 ? (
+                <p style={{ color: 'var(--gray-500)', fontSize: '13px', padding: '20px', textAlign: 'center', background: 'var(--gray-50)', borderRadius: 'var(--radius)' }}>
+                  No additional documents added yet.
+                </p>
+              ) : (
+                additionalAtts.map(({ att, originalIndex }) => (
                   <div key={originalIndex} className="attachment-item">
                     <div className="file-info">
                       <span>📎</span>
@@ -884,16 +951,11 @@ function FormContent() {
                         </div>
                       </div>
                     </div>
-                    <button
-                      className="btn-icon"
-                      onClick={() => removeAttachment(originalIndex)}
-                      title="Remove"
-                    >
-                      ✕
-                    </button>
+                    <button className="btn-icon" onClick={() => removeAttachment(originalIndex)} title="Remove">✕</button>
                   </div>
                 ))
-            )}
+              );
+            })()}
           </div>
         </div>
 

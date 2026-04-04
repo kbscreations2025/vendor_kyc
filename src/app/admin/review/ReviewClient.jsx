@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useOptimistic } from 'react';
+import { useState, useTransition, useOptimistic, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useKyc } from '@/context/KycContext';
 import Toast, { useToast } from '@/components/Toast';
@@ -11,12 +11,78 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
   const { markAsViewed, updateSubmissionStatus } = useKyc();
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [comment, setComment] = useState('');
-  const [filter, setFilter] = useState('all');
   const [viewingDoc, setViewingDoc] = useState(null);
   const [isPending, startTransition] = useTransition();
   const { toast, showToast, clearToast } = useToast();
 
-  // Optimistic state: instant UI updates before API responds
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportDateRange, setExportDateRange] = useState('all');
+  const [exportDateFrom, setExportDateFrom] = useState('');
+  const [exportDateTo, setExportDateTo] = useState('');
+
+  // All exportable columns
+  const ALL_EXPORT_COLUMNS = [
+    { key: 'vendorName', label: 'Vendor Name' },
+    { key: 'legalName', label: 'Legal Name' },
+    { key: 'tradeName', label: 'Trade Name' },
+    { key: 'fullAddress', label: 'Address (Full)' },
+    { key: 'activity', label: 'Activity' },
+    { key: 'contactPerson', label: 'Contact Person' },
+    { key: 'contactNo', label: 'Contact No.' },
+    { key: 'contactEmail', label: 'Contact Email' },
+    { key: 'pan', label: 'PAN' },
+    { key: 'tan', label: 'TAN' },
+    { key: 'gstNo', label: 'GST No.' },
+    { key: 'gstNotRegistered', label: 'GST Not Registered' },
+    { key: 'lutNo', label: 'LUT No.' },
+    { key: 'lutYear', label: 'LUT Year' },
+    { key: 'msmeNo', label: 'MSME No.' },
+    { key: 'msmeCategory', label: 'MSME Category' },
+    { key: 'bankName', label: 'Bank Name' },
+    { key: 'bankAccountNo', label: 'Bank A/c No.' },
+    { key: 'ifscCode', label: 'IFSC Code' },
+    { key: 'attachments', label: 'Attachments' },
+    { key: 'submittedAt', label: 'Submitted At' },
+    { key: 'status', label: 'Status' },
+    { key: 'comment', label: 'Admin Comment' },
+  ];
+
+  const [exportColumns, setExportColumns] = useState(() =>
+    ALL_EXPORT_COLUMNS.map((c) => c.key)
+  );
+
+  const toggleExportColumn = (key) => {
+    setExportColumns((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
+  // Column filters
+  const [filters, setFilters] = useState({
+    vendorName: '',
+    pan: '',
+    tradeName: '',
+    address: '',
+    contactNo: '',
+    dateRange: 'all',
+    dateFrom: '',
+    dateTo: '',
+    status: 'all',
+  });
+
+  const updateFilter = (key, value) => {
+    setFilters((prev) => {
+      const updated = { ...prev, [key]: value };
+      // When switching date range preset, clear custom dates
+      if (key === 'dateRange' && value !== 'custom') {
+        updated.dateFrom = '';
+        updated.dateTo = '';
+      }
+      return updated;
+    });
+  };
+
+  // Optimistic state
   const [optimisticSubmissions, applyOptimistic] = useOptimistic(
     serverSubmissions,
     (currentList, { id, status, comment: newComment }) =>
@@ -33,14 +99,77 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
       )
   );
 
-  const filtered = optimisticSubmissions.filter((s) => {
-    if (filter === 'all') return true;
-    return s.status === filter;
+  // Helper: combine address fields for display/filter
+  const getFullAddress = (s) => {
+    return [s.address, s.city, s.district, s.pinCode].filter(Boolean).join(', ');
+  };
+
+  // Helper: get date range start based on preset
+  const getDateRangeStart = (preset) => {
+    const now = new Date();
+    switch (preset) {
+      case 'last1m': return new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+      case 'last2m': return new Date(now.getFullYear(), now.getMonth() - 2, now.getDate());
+      case 'last3m': return new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+      default: return null;
+    }
+  };
+
+  // Apply column filters + sort
+  const sorted = useMemo(() => {
+    let result = optimisticSubmissions;
+
+    if (filters.vendorName) {
+      result = result.filter((s) => (s.vendorName || '').toLowerCase().includes(filters.vendorName.toLowerCase()));
+    }
+    if (filters.pan) {
+      result = result.filter((s) => (s.pan || '').toLowerCase().includes(filters.pan.toLowerCase()));
+    }
+    if (filters.tradeName) {
+      result = result.filter((s) => (s.tradeName || '').toLowerCase().includes(filters.tradeName.toLowerCase()));
+    }
+    if (filters.address) {
+      result = result.filter((s) => getFullAddress(s).toLowerCase().includes(filters.address.toLowerCase()));
+    }
+    if (filters.contactNo) {
+      result = result.filter((s) => (s.contactNo || '').includes(filters.contactNo));
+    }
+
+    // Date range filter
+    if (filters.dateRange !== 'all') {
+      if (filters.dateRange === 'custom') {
+        const from = filters.dateFrom ? new Date(filters.dateFrom) : null;
+        const to = filters.dateTo ? new Date(filters.dateTo + 'T23:59:59') : null;
+        result = result.filter((s) => {
+          if (!s.submittedAt) return false;
+          const d = new Date(s.submittedAt);
+          if (from && d < from) return false;
+          if (to && d > to) return false;
+          return true;
+        });
+      } else {
+        const rangeStart = getDateRangeStart(filters.dateRange);
+        if (rangeStart) {
+          result = result.filter((s) => s.submittedAt && new Date(s.submittedAt) >= rangeStart);
+        }
+      }
+    }
+
+    if (filters.status !== 'all') {
+      result = result.filter((s) => s.status === filters.status);
+    }
+
+    return [...result].sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
+  }, [optimisticSubmissions, filters]);
+
+  const hasActiveFilters = Object.entries(filters).some(([k, v]) => {
+    if (k === 'status' || k === 'dateRange') return v !== 'all';
+    return v !== '';
   });
 
-  const sorted = [...filtered].sort(
-    (a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)
-  );
+  const clearFilters = () => {
+    setFilters({ vendorName: '', pan: '', tradeName: '', address: '', contactNo: '', dateRange: 'all', dateFrom: '', dateTo: '', status: 'all' });
+  };
 
   const openReview = async (submission) => {
     try {
@@ -65,14 +194,11 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
     const currentComment = comment;
     const label = status === 'approved' ? 'Approved' : 'Rejected';
 
-    // Close modal immediately
     setSelectedSubmission(null);
     setComment('');
 
-    // Optimistic update: badge changes instantly in table
     applyOptimistic({ id: subId, status, comment: currentComment });
 
-    // API call + revalidate server data in background
     startTransition(async () => {
       try {
         await updateSubmissionStatus(subId, status, currentComment);
@@ -80,153 +206,180 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
         router.refresh();
       } catch (err) {
         showToast(`Failed to update status: ${err.message}`, 'error');
-        router.refresh(); // Re-sync to undo optimistic state
+        router.refresh();
       }
     });
   };
 
-  const openDocument = (att) => {
-    setViewingDoc(att);
+  const openDocument = (att) => setViewingDoc(att);
+  const isImage = (mimeType) => mimeType && mimeType.startsWith('image/');
+  const isPdf = (mimeType) => mimeType && mimeType === 'application/pdf';
+
+  const formatValue = (key, s) => {
+    switch (key) {
+      case 'fullAddress': return [s.address, s.city, s.district, s.pinCode].filter(Boolean).join(', ');
+      case 'gstNotRegistered': return s.gstNotRegistered ? 'Yes' : 'No';
+      case 'attachments': return (s.attachments || []).map((a) => a.renamedName).join(', ');
+      case 'submittedAt': return s.submittedAt ? new Date(s.submittedAt).toLocaleString() : '';
+      default: return s[key] || '';
+    }
   };
 
-  const isImage = (mimeType) => {
-    return mimeType && mimeType.startsWith('image/');
+  // Get rows filtered by export date range
+  const getExportRows = () => {
+    let rows = sorted;
+    if (exportDateRange === 'custom') {
+      const from = exportDateFrom ? new Date(exportDateFrom) : null;
+      const to = exportDateTo ? new Date(exportDateTo + 'T23:59:59') : null;
+      rows = rows.filter((s) => {
+        if (!s.submittedAt) return false;
+        const d = new Date(s.submittedAt);
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return true;
+      });
+    } else if (exportDateRange !== 'all') {
+      const rangeStart = getDateRangeStart(exportDateRange);
+      if (rangeStart) {
+        rows = rows.filter((s) => s.submittedAt && new Date(s.submittedAt) >= rangeStart);
+      }
+    }
+    return rows;
   };
 
-  const isPdf = (mimeType) => {
-    return mimeType && mimeType === 'application/pdf';
-  };
+  const exportRows = showExportModal ? getExportRows() : [];
 
   const exportToExcel = () => {
-    if (sorted.length === 0) return;
-
+    if (exportRows.length === 0 || exportColumns.length === 0) return;
     try {
-    const exportData = sorted.map((s, index) => ({
-      'Sr. No.': index + 1,
-      'Vendor Name': s.vendorName || '',
-      'Legal Name': s.legalName || '',
-      'Trade Name': s.tradeName || '',
-      'Address': s.address || '',
-      'City': s.city || '',
-      'District': s.district || '',
-      'PIN Code': s.pinCode || '',
-      'Activity': s.activity || '',
-      'Contact Person': s.contactPerson || '',
-      'Contact No.': s.contactNo || '',
-      'Contact Email': s.contactEmail || '',
-      'PAN': s.pan || '',
-      'TAN': s.tan || '',
-      'GST No.': s.gstNo || '',
-      'GST Not Registered': s.gstNotRegistered ? 'Yes' : 'No',
-      'LUT No.': s.lutNo || '',
-      'Year': s.year || '',
-      'MSME No.': s.msmeNo || '',
-      'MSME Category': s.msmeCategory || '',
-      'Bank Name': s.bankName || '',
-      'Bank A/c No.': s.bankAccountNo || '',
-      'IFSC Code': s.ifscCode || '',
-      'Attachments': (s.attachments || []).map((a) => a.renamedName).join(', '),
-      'Submitted At': s.submittedAt ? new Date(s.submittedAt).toLocaleString() : '',
-      'Status': s.status || '',
-      'Admin Comment': s.comment || '',
-    }));
+      const selectedCols = ALL_EXPORT_COLUMNS.filter((c) => exportColumns.includes(c.key));
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const colWidths = Object.keys(exportData[0]).map((key) => {
-      const maxLen = Math.max(
-        key.length,
-        ...exportData.map((row) => String(row[key] || '').length)
-      );
-      return { wch: Math.min(maxLen + 2, 40) };
-    });
-    ws['!cols'] = colWidths;
+      const exportData = exportRows.map((s, index) => {
+        const row = { 'Sr. No.': index + 1 };
+        selectedCols.forEach((col) => {
+          row[col.label] = formatValue(col.key, s);
+        });
+        return row;
+      });
 
-    const wb = XLSX.utils.book_new();
-    const filterLabel = filter === 'all' ? 'All' : filter.charAt(0).toUpperCase() + filter.slice(1);
-    XLSX.utils.book_append_sheet(wb, ws, `KYC_${filterLabel}`);
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const colWidths = Object.keys(exportData[0]).map((key) => {
+        const maxLen = Math.max(key.length, ...exportData.map((row) => String(row[key] || '').length));
+        return { wch: Math.min(maxLen + 2, 40) };
+      });
+      ws['!cols'] = colWidths;
 
-    const fileName = `KBS_Vendor_KYC_${filterLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-    showToast('Excel exported successfully.', 'success');
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'KYC_Submissions');
+      XLSX.writeFile(wb, `KBS_Vendor_KYC_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      setShowExportModal(false);
+      showToast(`Exported ${exportRows.length} rows with ${selectedCols.length} columns.`, 'success');
     } catch (err) {
       showToast('Failed to export Excel. Please try again.', 'error');
     }
   };
 
   return (
-    <>
-      <div className="card">
-        <div className="card-header">
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+      <div className="card" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="card-header" style={{ flexShrink: 0 }}>
           <h2>
-            Submissions ({filtered.length})
+            Submissions ({sorted.length} of {optimisticSubmissions.length})
             {isPending && <span style={{ fontSize: '13px', color: 'var(--gray-400)', fontWeight: '400', marginLeft: '10px' }}>Updating...</span>}
           </h2>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {['all', 'pending', 'viewed', 'approved', 'rejected'].map((f) => (
-              <button
-                key={f}
-                className={`btn btn-sm ${filter === f ? 'btn-primary' : 'btn-outline'}`}
-                onClick={() => setFilter(f)}
-              >
-                {f.charAt(0).toUpperCase() + f.slice(1)}
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            {hasActiveFilters && (
+              <button className="btn btn-sm btn-outline" onClick={clearFilters}>
+                Clear Filters
               </button>
-            ))}
-            <div style={{ width: '1px', height: '24px', background: 'var(--gray-300)', margin: '0 4px' }} />
+            )}
             <button
               className="btn btn-sm btn-success"
-              onClick={exportToExcel}
+              onClick={() => setShowExportModal(true)}
               disabled={sorted.length === 0}
-              title={`Export ${filter === 'all' ? 'all' : filter} submissions to Excel`}
             >
               Export Excel
             </button>
           </div>
         </div>
 
-        {sorted.length === 0 ? (
+        {optimisticSubmissions.length === 0 ? (
           <p style={{ color: 'var(--gray-500)', textAlign: 'center', padding: '40px' }}>
-            {filter === 'all'
-              ? 'No submissions received yet.'
-              : `No ${filter} submissions.`}
+            No submissions received yet.
           </p>
         ) : (
-          <>
-            <p style={{ fontSize: '13px', color: 'var(--gray-500)', marginBottom: '12px' }}>
-              Showing {sorted.length} {filter === 'all' ? '' : filter} submission(s). Click &quot;Export Excel&quot; to download.
-            </p>
-            <div className="table-wrapper">
-              <table>
-                <thead>
+          <div className="table-wrapper" style={{ flex: 1, maxHeight: 'none' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Sr.</th>
+                  <th>Vendor Name</th>
+                  <th>PAN</th>
+                  <th>Trade Name</th>
+                  <th>Address</th>
+                  <th>Contact</th>
+                  <th>Submitted</th>
+                  <th>Status</th>
+                </tr>
+                <tr className="filter-row">
+                  <th></th>
+                  <th><input placeholder="Filter..." value={filters.vendorName} onChange={(e) => updateFilter('vendorName', e.target.value)} /></th>
+                  <th><input placeholder="Filter..." value={filters.pan} onChange={(e) => updateFilter('pan', e.target.value)} /></th>
+                  <th><input placeholder="Filter..." value={filters.tradeName} onChange={(e) => updateFilter('tradeName', e.target.value)} /></th>
+                  <th><input placeholder="Search address..." value={filters.address} onChange={(e) => updateFilter('address', e.target.value)} /></th>
+                  <th><input placeholder="Filter..." value={filters.contactNo} onChange={(e) => updateFilter('contactNo', e.target.value)} /></th>
+                  <th style={{ minWidth: '140px' }}>
+                    <select value={filters.dateRange} onChange={(e) => updateFilter('dateRange', e.target.value)}>
+                      <option value="all">All Time</option>
+                      <option value="last1m">Last 1 Month</option>
+                      <option value="last2m">Last 2 Months</option>
+                      <option value="last3m">Last 3 Months</option>
+                      <option value="custom">Custom Range</option>
+                    </select>
+                    {filters.dateRange === 'custom' && (
+                      <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
+                        <input type="date" value={filters.dateFrom} onChange={(e) => updateFilter('dateFrom', e.target.value)} style={{ flex: 1 }} />
+                        <input type="date" value={filters.dateTo} onChange={(e) => updateFilter('dateTo', e.target.value)} style={{ flex: 1 }} />
+                      </div>
+                    )}
+                  </th>
+                  <th>
+                    <select value={filters.status} onChange={(e) => updateFilter('status', e.target.value)}>
+                      <option value="all">All</option>
+                      <option value="pending">Pending</option>
+                      <option value="viewed">Viewed</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                    </select>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.length === 0 ? (
                   <tr>
-                    <th>Sr.</th>
-                    <th>Vendor Name</th>
-                    <th>PAN</th>
-                    <th>Trade Name</th>
-                    <th>City</th>
-                    <th>Contact</th>
-                    <th>Submitted</th>
-                    <th>Status</th>
+                    <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--gray-500)' }}>
+                      No submissions match your filters.
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {sorted.map((s, i) => (
+                ) : (
+                  sorted.map((s, i) => (
                     <tr key={s.id} onClick={() => openReview(s)}>
                       <td>{i + 1}</td>
                       <td><strong>{s.vendorName}</strong></td>
                       <td>{s.pan}</td>
                       <td>{s.tradeName || '-'}</td>
-                      <td>{s.city || '-'}</td>
+                      <td style={{ fontSize: '13px', maxWidth: '220px' }}>{getFullAddress(s) || '-'}</td>
                       <td>{s.contactNo || '-'}</td>
                       <td>{new Date(s.submittedAt).toLocaleDateString()}</td>
                       <td>
                         <span className={`badge badge-${s.status}`}>{s.status}</span>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -235,15 +388,11 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>KYC Review - {selectedSubmission.vendorName}</h2>
-              <button className="btn-icon" onClick={() => setSelectedSubmission(null)}>
-                ✕
-              </button>
+              <button className="btn-icon" onClick={() => setSelectedSubmission(null)}>✕</button>
             </div>
             <div className="modal-body">
               <div style={{ marginBottom: '16px' }}>
-                <span className={`badge badge-${selectedSubmission.status}`}>
-                  {selectedSubmission.status}
-                </span>
+                <span className={`badge badge-${selectedSubmission.status}`}>{selectedSubmission.status}</span>
               </div>
 
               <h3 style={{ fontSize: '15px', marginBottom: '12px', color: 'var(--gray-700)' }}>Basic Information</h3>
@@ -266,14 +415,22 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
               <div className="detail-row"><span className="label">TAN</span><span className="value">{selectedSubmission.tan || '-'}</span></div>
 
               <h3 style={{ fontSize: '15px', margin: '20px 0 12px', color: 'var(--gray-700)' }}>GST Details</h3>
-              <div className="detail-row"><span className="label">GST No.</span><span className="value">{selectedSubmission.gstNo || '-'}</span></div>
-              <div className="detail-row"><span className="label">LUT No.</span><span className="value">{selectedSubmission.lutNo || '-'}</span></div>
-              <div className="detail-row"><span className="label">Year</span><span className="value">{selectedSubmission.year || '-'}</span></div>
+              <div className="detail-row"><span className="label">GST No.</span><span className="value">{selectedSubmission.gstNotRegistered ? 'Not Registered' : (selectedSubmission.gstNo || '-')}</span></div>
+              {!selectedSubmission.gstNotRegistered && selectedSubmission.goodsSent && (
+                <>
+                  <div className="detail-row"><span className="label">LUT No.</span><span className="value">{selectedSubmission.lutNo || '-'}</span></div>
+                  <div className="detail-row"><span className="label">LUT Year</span><span className="value">{selectedSubmission.lutYear || '-'}</span></div>
+                </>
+              )}
 
               <h3 style={{ fontSize: '15px', margin: '20px 0 12px', color: 'var(--gray-700)' }}>MSME Details</h3>
-              <div className="detail-row"><span className="label">MSME No.</span><span className="value">{selectedSubmission.msmeNo || '-'}</span></div>
-              <div className="detail-row"><span className="label">Category</span><span className="value">{selectedSubmission.msmeCategory || '-'}</span></div>
-              <div className="detail-row"><span className="label">Not Registered</span><span className="value">{selectedSubmission.gstNotRegistered ? 'Yes (URD Letter Required)' : 'No'}</span></div>
+              <div className="detail-row"><span className="label">MSME No.</span><span className="value">{selectedSubmission.msmeNotRegistered ? 'Not Registered' : (selectedSubmission.msmeNo || '-')}</span></div>
+              {!selectedSubmission.msmeNotRegistered && (
+                <>
+                  <div className="detail-row"><span className="label">Category</span><span className="value">{selectedSubmission.msmeCategory || '-'}</span></div>
+                  <div className="detail-row"><span className="label">MSME Year</span><span className="value">{selectedSubmission.msmeYear || '-'}</span></div>
+                </>
+              )}
 
               <h3 style={{ fontSize: '15px', margin: '20px 0 12px', color: 'var(--gray-700)' }}>Bank Details</h3>
               <div className="detail-row"><span className="label">Bank Name</span><span className="value">{selectedSubmission.bankName || '-'}</span></div>
@@ -307,24 +464,30 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
                 </div>
               )}
 
-              <div className="form-group" style={{ marginTop: '20px' }}>
-                <label>Admin Comment</label>
-                <textarea
-                  className="form-control"
-                  value={comment}
-                  onChange={(e) => setComment(e.target.value)}
-                  placeholder="Add a comment about this submission..."
-                  rows={3}
-                />
-              </div>
+              {selectedSubmission.status !== 'approved' && (
+                <div className="form-group" style={{ marginTop: '20px' }}>
+                  <label>Admin Comment</label>
+                  <textarea
+                    className="form-control"
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder="Add a comment about this submission..."
+                    rows={3}
+                  />
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setSelectedSubmission(null)}>Close</button>
-              {selectedSubmission.status !== 'rejected' && (
-                <button className="btn btn-danger" onClick={() => handleAction('rejected')}>Reject</button>
-              )}
-              {selectedSubmission.status !== 'approved' && (
-                <button className="btn btn-success" onClick={() => handleAction('approved')}>Approve</button>
+              {selectedSubmission.status === 'approved' ? (
+                <span style={{ padding: '8px 16px', background: 'var(--success-light)', color: 'var(--success)', borderRadius: 'var(--radius)', fontSize: '13px', fontWeight: '600' }}>
+                  This vendor is approved and cannot be changed
+                </span>
+              ) : (
+                <>
+                  <button className="btn btn-danger" onClick={() => handleAction('rejected')}>Reject</button>
+                  <button className="btn btn-success" onClick={() => handleAction('approved')}>Approve</button>
+                </>
               )}
             </div>
           </div>
@@ -363,7 +526,98 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
         </div>
       )}
 
+      {/* Export Column Picker Modal */}
+      {showExportModal && (
+        <div className="modal-overlay" onClick={() => setShowExportModal(false)}>
+          <div className="modal" style={{ maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Export to Excel</h2>
+              <button className="btn-icon" onClick={() => setShowExportModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {/* Date Range Filter */}
+              <div style={{ marginBottom: '20px', padding: '14px 16px', background: 'var(--gray-50)', borderRadius: 'var(--radius)', border: '1px solid var(--gray-200)' }}>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--gray-700)', display: 'block', marginBottom: '8px' }}>
+                  Date Range
+                </label>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  {[
+                    { value: 'all', label: 'All Time' },
+                    { value: 'last1m', label: 'Last 1 Month' },
+                    { value: 'last2m', label: 'Last 2 Months' },
+                    { value: 'last3m', label: 'Last 3 Months' },
+                    { value: 'custom', label: 'Custom' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      className={`btn btn-sm ${exportDateRange === opt.value ? 'btn-primary' : 'btn-outline'}`}
+                      onClick={() => {
+                        setExportDateRange(opt.value);
+                        if (opt.value !== 'custom') { setExportDateFrom(''); setExportDateTo(''); }
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {exportDateRange === 'custom' && (
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '10px', alignItems: 'center' }}>
+                    <div>
+                      <label style={{ fontSize: '12px', color: 'var(--gray-500)' }}>From</label>
+                      <input type="date" className="form-control" style={{ fontSize: '13px', padding: '6px 10px' }} value={exportDateFrom} onChange={(e) => setExportDateFrom(e.target.value)} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '12px', color: 'var(--gray-500)' }}>To</label>
+                      <input type="date" className="form-control" style={{ fontSize: '13px', padding: '6px 10px' }} value={exportDateTo} onChange={(e) => setExportDateTo(e.target.value)} />
+                    </div>
+                  </div>
+                )}
+                <p style={{ fontSize: '12px', color: 'var(--gray-500)', marginTop: '8px', margin: '8px 0 0' }}>
+                  <strong>{exportRows.length}</strong> rows match this date range{hasActiveFilters ? ' (table filters also applied)' : ''}
+                </p>
+              </div>
+
+              {/* Column Picker */}
+              <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--gray-700)', display: 'block', marginBottom: '8px' }}>
+                Columns to Export
+              </label>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                <button className="btn btn-sm btn-outline" onClick={() => setExportColumns(ALL_EXPORT_COLUMNS.map((c) => c.key))}>
+                  Select All
+                </button>
+                <button className="btn btn-sm btn-outline" onClick={() => setExportColumns([])}>
+                  Deselect All
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', maxHeight: '250px', overflowY: 'auto', padding: '4px 0' }}>
+                {ALL_EXPORT_COLUMNS.map((col) => (
+                  <label key={col.key} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', padding: '4px 8px', borderRadius: '4px', background: exportColumns.includes(col.key) ? 'var(--primary-light)' : 'transparent' }}>
+                    <input
+                      type="checkbox"
+                      checked={exportColumns.includes(col.key)}
+                      onChange={() => toggleExportColumn(col.key)}
+                    />
+                    {col.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setShowExportModal(false)}>Cancel</button>
+              <button
+                className="btn btn-success"
+                onClick={exportToExcel}
+                disabled={exportColumns.length === 0 || exportRows.length === 0}
+              >
+                Export {exportRows.length} Rows / {exportColumns.length} Columns
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Toast toast={toast} onClose={clearToast} />
-    </>
+    </div>
   );
 }
