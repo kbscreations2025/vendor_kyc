@@ -680,7 +680,7 @@ function FormContent() {
                       checked={form.goodsSent}
                       onChange={(e) => updateField('goodsSent', e.target.checked)}
                     />
-                    Is Goods Sent (LUT applicable)
+                    If goods or services supply to SEZ (LUT applicable)
                   </label>
                 </div>
                 {form.goodsSent && (
