@@ -13,6 +13,7 @@ const LINK_FIELDS = {
   id: 'id',
   pan: 'pan',
   link: 'link',
+  shortCode: 'short_code',
   status: 'status',
   createdAt: 'created_at',
   expiresAt: 'expires_at',
@@ -234,6 +235,16 @@ function generateId(prefix = 'id') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// Generate a short 8-char alphanumeric code for URLs
+function generateShortCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
 // ─── Links API ───────────────────────────────────────────────────────────────
 
 export async function fetchLinks() {
@@ -269,6 +280,7 @@ export async function createLinks(newLinks) {
   const created = newLinks.map((link) => ({
     id: generateId('link'),
     ...link,
+    shortCode: link.shortCode || generateShortCode(),
     status: link.status || 'active',
     createdAt: link.createdAt || new Date().toISOString(),
   }));
@@ -617,4 +629,23 @@ export async function checkSubmissionByPan(pan) {
   await delay(100);
   const found = dummyDB.submissions.find((s) => s.pan === pan);
   return found ? { id: found.id, status: found.status } : null;
+}
+
+// ─── Lookup link by short code ───────────────────────────────────────────────
+
+export async function findLinkByShortCode(shortCode) {
+  if (isSupabaseConfigured()) {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from('vkyc_ad_links')
+      .select('link')
+      .eq('short_code', shortCode)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data?.link || null;
+  }
+
+  // Dummy mode
+  const found = dummyDB.links.find((l) => l.shortCode === shortCode);
+  return found?.link || null;
 }

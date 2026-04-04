@@ -5,6 +5,15 @@ import { useKyc } from '@/context/KycContext';
 import { generateEncryptedLink, validatePAN } from '@/lib/encryption';
 import * as XLSX from 'xlsx';
 
+function generateShortCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
 export default function GenerateLink() {
   const { addLinks, links, loaded } = useKyc();
   const [activeTab, setActiveTab] = useState('multiple');
@@ -90,13 +99,17 @@ export default function GenerateLink() {
       return;
     }
 
-    const newLinks = validPans.map((pan) => ({
-      pan,
-      link: generateEncryptedLink(pan, getBaseUrl()),
-      createdAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
-      status: 'active',
-    }));
+    const newLinks = validPans.map((pan) => {
+      const shortCode = generateShortCode();
+      return {
+        pan,
+        link: generateEncryptedLink(pan, ''),
+        shortCode,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+        status: 'active',
+      };
+    });
 
     try {
       await addLinks(newLinks);
@@ -139,13 +152,17 @@ export default function GenerateLink() {
         if (errs.length > 0) setErrors(errs);
 
         if (pans.length > 0) {
-          const newLinks = pans.map((pan) => ({
-            pan,
-            link: generateEncryptedLink(pan, getBaseUrl()),
-            createdAt: new Date().toISOString(),
-            expiresAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
-            status: 'active',
-          }));
+          const newLinks = pans.map((pan) => {
+            const shortCode = generateShortCode();
+            return {
+              pan,
+              link: generateEncryptedLink(pan, ''),
+              shortCode,
+              createdAt: new Date().toISOString(),
+              expiresAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+              status: 'active',
+            };
+          });
           addLinks(newLinks)
             .then(() => showToast(`${newLinks.length} links generated from Excel!`))
             .catch((err) => setErrors((prev) => [...prev, `Failed to save links: ${err.message}`]));
@@ -158,8 +175,9 @@ export default function GenerateLink() {
     reader.readAsBinaryString(file);
   };
 
-  const copyToClipboard = (link, id) => {
-    navigator.clipboard.writeText(link).then(() => {
+  const copyToClipboard = (shortCode, id) => {
+    const shortUrl = `${getBaseUrl()}/v/${shortCode}`;
+    navigator.clipboard.writeText(shortUrl).then(() => {
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
     });
@@ -264,9 +282,13 @@ export default function GenerateLink() {
                     <tr key={item.id} style={{ cursor: 'default' }}>
                       <td><strong>{item.pan}</strong></td>
                       <td>
-                        <span style={{ fontSize: '12px', color: 'var(--gray-600)', maxWidth: '300px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {item.link}
-                        </span>
+                        {item.shortCode ? (
+                          <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: '500' }}>
+                            /v/{item.shortCode}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '11px', color: 'var(--gray-400)' }}>Legacy link</span>
+                        )}
                       </td>
                       <td>{new Date(item.createdAt).toLocaleDateString()}</td>
                       <td>{new Date(item.expiresAt).toLocaleDateString()}</td>
@@ -276,8 +298,8 @@ export default function GenerateLink() {
                       <td>
                         <button
                           className={`copy-btn ${copiedId === item.id ? 'copied' : ''}`}
-                          onClick={() => copyToClipboard(item.link, item.id)}
-                          disabled={expired || item.status === 'submitted'}
+                          onClick={() => copyToClipboard(item.shortCode, item.id)}
+                          disabled={expired || item.status === 'submitted' || !item.shortCode}
                         >
                           {copiedId === item.id ? 'Copied!' : 'Copy Link'}
                         </button>
