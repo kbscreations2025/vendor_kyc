@@ -27,22 +27,14 @@ export default function SidebarNav({ user }) {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <Image
-          src="/LogoSys.jpg"
+          src="/LogoSys1.jpg"
           alt="KBS Logo"
-          width={44}
-          height={44}
-          style={{ borderRadius: '8px', objectFit: 'contain', flexShrink: 0 }}
+          width={160}
+          height={48}
+          style={{ objectFit: 'contain' }}
         />
-        <div>
-          <h2 style={{ fontSize: '16px', lineHeight: '1.2' }}>KBS - Vendor KYC</h2>
-          {user && (
-            <p style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '2px' }}>
-              {user.name}
-            </p>
-          )}
-        </div>
       </div>
       <nav className="sidebar-nav">
         {navItems.map((item) => (
