@@ -68,6 +68,7 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
     dateFrom: '',
     dateTo: '',
     status: 'all',
+    reKyc: 'all',
   });
 
   const updateFilter = (key, value) => {
@@ -159,16 +160,33 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
       result = result.filter((s) => s.status === filters.status);
     }
 
+    // Re-KYC filter
+    if (filters.reKyc !== 'all') {
+      result = result.filter((s) => {
+        if (!s.submittedAt) return false;
+        const reKycDate = new Date(s.submittedAt);
+        reKycDate.setFullYear(reKycDate.getFullYear() + 3);
+        const diffDays = Math.ceil((reKycDate - new Date()) / (1000 * 60 * 60 * 24));
+        switch (filters.reKyc) {
+          case 'expired': return diffDays <= 0;
+          case '90days': return diffDays > 0 && diffDays <= 90;
+          case '1year': return diffDays > 0 && diffDays <= 365;
+          case '2year': return diffDays > 0 && diffDays <= 730;
+          default: return true;
+        }
+      });
+    }
+
     return [...result].sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
   }, [optimisticSubmissions, filters]);
 
   const hasActiveFilters = Object.entries(filters).some(([k, v]) => {
-    if (k === 'status' || k === 'dateRange') return v !== 'all';
+    if (k === 'status' || k === 'dateRange' || k === 'reKyc') return v !== 'all';
     return v !== '';
   });
 
   const clearFilters = () => {
-    setFilters({ vendorName: '', pan: '', tradeName: '', address: '', contactNo: '', dateRange: 'all', dateFrom: '', dateTo: '', status: 'all' });
+    setFilters({ vendorName: '', pan: '', tradeName: '', address: '', contactNo: '', dateRange: 'all', dateFrom: '', dateTo: '', status: 'all', reKyc: 'all' });
   };
 
   const openReview = async (submission) => {
@@ -319,6 +337,7 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
                   <th>Address</th>
                   <th>Contact</th>
                   <th>Submitted</th>
+                  <th>Re-KYC In</th>
                   <th>Status</th>
                 </tr>
                 <tr className="filter-row">
@@ -344,6 +363,15 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
                     )}
                   </th>
                   <th>
+                    <select value={filters.reKyc} onChange={(e) => updateFilter('reKyc', e.target.value)}>
+                      <option value="all">All</option>
+                      <option value="expired">Expired</option>
+                      <option value="90days">Within 90 Days</option>
+                      <option value="1year">Within 1 Year</option>
+                      <option value="2year">Within 2 Years</option>
+                    </select>
+                  </th>
+                  <th>
                     <select value={filters.status} onChange={(e) => updateFilter('status', e.target.value)}>
                       <option value="all">All</option>
                       <option value="pending">Pending</option>
@@ -357,7 +385,7 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
               <tbody>
                 {sorted.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--gray-500)' }}>
+                    <td colSpan={9} style={{ textAlign: 'center', padding: '30px', color: 'var(--gray-500)' }}>
                       No submissions match your filters.
                     </td>
                   </tr>
@@ -371,6 +399,25 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
                       <td style={{ fontSize: '13px', maxWidth: '220px' }}>{getFullAddress(s) || '-'}</td>
                       <td>{s.contactNo || '-'}</td>
                       <td>{new Date(s.submittedAt).toLocaleDateString()}</td>
+                      <td>
+                        {(() => {
+                          const submitted = new Date(s.submittedAt);
+                          const reKycDate = new Date(submitted);
+                          reKycDate.setFullYear(reKycDate.getFullYear() + 3);
+                          const now = new Date();
+                          const diffDays = Math.ceil((reKycDate - now) / (1000 * 60 * 60 * 24));
+                          if (diffDays <= 0) return <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Overdue</span>;
+                          if (diffDays <= 90) return <span style={{ color: 'var(--warning)', fontWeight: 600 }}>{diffDays} days</span>;
+                          const years = Math.floor(diffDays / 365);
+                          const months = Math.floor((diffDays % 365) / 30);
+                          const days = diffDays % 30;
+                          const parts = [];
+                          if (years) parts.push(`${years}y`);
+                          if (months) parts.push(`${months}m`);
+                          if (days) parts.push(`${days}d`);
+                          return <span style={{ color: 'var(--success)' }}>{parts.join(' ')}</span>;
+                        })()}
+                      </td>
                       <td>
                         <span className={`badge badge-${s.status}`}>{s.status}</span>
                       </td>
@@ -393,6 +440,28 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
             <div className="modal-body">
               <div style={{ marginBottom: '16px' }}>
                 <span className={`badge badge-${selectedSubmission.status}`}>{selectedSubmission.status}</span>
+                {(() => {
+                  const submitted = new Date(selectedSubmission.submittedAt);
+                  const reKycDate = new Date(submitted);
+                  reKycDate.setFullYear(reKycDate.getFullYear() + 3);
+                  const now = new Date();
+                  const diffDays = Math.ceil((reKycDate - now) / (1000 * 60 * 60 * 24));
+                  const isOverdue = diffDays <= 0;
+                  const isWarning = diffDays > 0 && diffDays <= 90;
+                  const color = isOverdue ? 'var(--danger)' : isWarning ? 'var(--warning)' : 'var(--primary)';
+                  const years = Math.floor(Math.abs(diffDays) / 365);
+                  const months = Math.floor((Math.abs(diffDays) % 365) / 30);
+                  const days = Math.abs(diffDays) % 30;
+                  const parts = [];
+                  if (years) parts.push(`${years}y`);
+                  if (months) parts.push(`${months}m`);
+                  if (days) parts.push(`${days}d`);
+                  return (
+                    <span style={{ marginLeft: '10px', fontSize: '13px', color, fontWeight: 600 }}>
+                      Re-KYC: {isOverdue ? `Overdue by ${parts.join(' ')}` : `Due in ${parts.join(' ')}`} ({reKycDate.toLocaleDateString()})
+                    </span>
+                  );
+                })()}
               </div>
 
               <h3 style={{ fontSize: '15px', marginBottom: '12px', color: 'var(--gray-700)' }}>Basic Information</h3>
@@ -416,6 +485,9 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
 
               <h3 style={{ fontSize: '15px', margin: '20px 0 12px', color: 'var(--gray-700)' }}>GST Details</h3>
               <div className="detail-row"><span className="label">GST No.</span><span className="value">{selectedSubmission.gstNotRegistered ? 'Not Registered' : (selectedSubmission.gstNo || '-')}</span></div>
+              {!selectedSubmission.gstNotRegistered && (
+                <div className="detail-row"><span className="label">Type of Registration</span><span className="value">{selectedSubmission.gstRegType || '-'}</span></div>
+              )}
               {!selectedSubmission.gstNotRegistered && selectedSubmission.goodsSent && (
                 <>
                   <div className="detail-row"><span className="label">LUT No.</span><span className="value">{selectedSubmission.lutNo || '-'}</span></div>

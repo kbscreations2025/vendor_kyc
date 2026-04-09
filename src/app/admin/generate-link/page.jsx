@@ -14,51 +14,78 @@ function generateShortCode() {
   return code;
 }
 
+const EMPTY_ROW = { name: '', pan: '', email: '' };
+
 export default function GenerateLink() {
   const { addLinks, links, loaded } = useKyc();
-  const [activeTab, setActiveTab] = useState('multiple');
-  const [multiPanInput, setMultiPanInput] = useState('');
+  const [activeTab, setActiveTab] = useState('manual');
+  const [rows, setRows] = useState([{ ...EMPTY_ROW }]);
   const [errors, setErrors] = useState([]);
   const [toast, setToast] = useState('');
   const [copiedId, setCopiedId] = useState(null);
   const fileInputRef = useRef(null);
 
   const isExpired = (expiresAt) => new Date() > new Date(expiresAt);
+  const [sending, setSending] = useState(false);
+
+  // Send KYC link emails for created links
+  const sendEmails = async (createdLinks) => {
+    const baseUrl = getBaseUrl();
+    const results = { sent: 0, failed: 0 };
+
+    for (const link of createdLinks) {
+      if (!link.email || !link.shortCode) continue;
+      try {
+        const res = await fetch('/api/send-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: link.email,
+            vendorName: link.vendorName || link.pan,
+            kycLink: `${baseUrl}/v/${link.shortCode}`,
+          }),
+        });
+        if (res.ok) results.sent++;
+        else results.failed++;
+      } catch {
+        results.failed++;
+      }
+    }
+    return results;
+  };
 
   const showToast = (msg) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3000);
   };
 
+  // ── Row management ──
+  const updateRow = (index, field, value) => {
+    setRows((prev) => prev.map((r, i) => i === index ? { ...r, [field]: field === 'pan' ? value.toUpperCase() : value } : r));
+  };
+
+  const addRow = () => setRows((prev) => [...prev, { ...EMPTY_ROW }]);
+
+  const removeRow = (index) => {
+    if (rows.length === 1) {
+      setRows([{ ...EMPTY_ROW }]);
+    } else {
+      setRows((prev) => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  // ── Excel template ──
   const downloadTemplate = () => {
     const templateData = [
-      ['PAN Number'],
-      ['ABCDE1234F'],
-      ['BCDEF2345G'],
+      ['Vendor Name', 'PAN Number', 'Email'],
+      ['Acme Pvt Ltd', 'ABCDE1234F', 'vendor@acme.com'],
+      ['Global Services', 'BCDEF2345G', 'info@global.com'],
     ];
     const ws = XLSX.utils.aoa_to_sheet(templateData);
-    ws['!cols'] = [{ wch: 18 }];
-
+    ws['!cols'] = [{ wch: 25 }, { wch: 15 }, { wch: 30 }];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'PAN_Numbers');
-
-    const instrData = [
-      ['KBS Vendor KYC - PAN Upload Template Instructions'],
-      [''],
-      ['1. Go to the "PAN_Numbers" sheet'],
-      ['2. Enter valid PAN numbers in Column A (first column)'],
-      ['3. PAN format: 5 letters + 4 digits + 1 letter (e.g. ABCDE1234F)'],
-      ['4. Row 1 is the header row - do not modify it'],
-      ['5. Delete the example rows before entering your data'],
-      ['6. Save the file and upload it in the "Excel Upload" tab'],
-      [''],
-      ['Note: Each PAN will generate a unique encrypted link valid for 4 days.'],
-    ];
-    const instrWs = XLSX.utils.aoa_to_sheet(instrData);
-    instrWs['!cols'] = [{ wch: 70 }];
-    XLSX.utils.book_append_sheet(wb, instrWs, 'Instructions');
-
-    XLSX.writeFile(wb, 'KBS_PAN_Upload_Template.xlsx');
+    XLSX.utils.book_append_sheet(wb, ws, 'Vendors');
+    XLSX.writeFile(wb, 'KBS_Vendor_Link_Template.xlsx');
     showToast('Template downloaded!');
   };
 
@@ -67,59 +94,70 @@ export default function GenerateLink() {
     return '';
   };
 
-  const handleMultipleAdd = async () => {
+  // ── Validate & generate from rows ──
+  const handleGenerate = async () => {
     setErrors([]);
-    const pans = multiPanInput
-      .split(/[\n,;]+/)
-      .map((p) => p.toUpperCase().trim())
-      .filter(Boolean);
+    const filledRows = rows.filter((r) => r.name.trim() || r.pan.trim() || r.email.trim());
 
-    if (pans.length === 0) {
-      setErrors(['Please enter at least one PAN number']);
+    if (filledRows.length === 0) {
+      setErrors(['Please fill at least one row']);
       return;
     }
 
     const errs = [];
-    const validPans = [];
+    const valid = [];
 
-    pans.forEach((pan, i) => {
-      if (!validatePAN(pan)) {
-        errs.push(`Line ${i + 1}: "${pan}" is not a valid PAN`);
-      } else if (links.find((l) => l.pan === pan && l.status !== 'submitted' && !isExpired(l.expiresAt))) {
-        errs.push(`"${pan}" already has an active link`);
-      } else if (validPans.includes(pan)) {
-        errs.push(`"${pan}" is duplicated`);
-      } else {
-        validPans.push(pan);
+    filledRows.forEach((row, i) => {
+      const line = `Row ${i + 1}`;
+      if (!row.name.trim()) { errs.push(`${line}: Name is required`); return; }
+      if (!row.pan.trim()) { errs.push(`${line}: PAN is required`); return; }
+      if (!validatePAN(row.pan)) { errs.push(`${line}: "${row.pan}" is not a valid PAN`); return; }
+      if (!row.email.trim()) { errs.push(`${line}: Email is required`); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email.trim())) { errs.push(`${line}: "${row.email}" is not a valid email`); return; }
+      if (links.find((l) => l.pan === row.pan.toUpperCase().trim() && l.status !== 'submitted' && !isExpired(l.expiresAt))) {
+        errs.push(`${line}: "${row.pan}" already has an active link`);
+        return;
       }
+      if (valid.find((v) => v.pan === row.pan.toUpperCase().trim())) {
+        errs.push(`${line}: "${row.pan}" is duplicated`);
+        return;
+      }
+      valid.push({ name: row.name.trim(), pan: row.pan.toUpperCase().trim(), email: row.email.trim() });
     });
 
-    if (errs.length > 0) {
-      setErrors(errs);
-      return;
-    }
+    if (errs.length > 0) { setErrors(errs); return; }
 
-    const newLinks = validPans.map((pan) => {
-      const shortCode = generateShortCode();
-      return {
-        pan,
-        link: generateEncryptedLink(pan, ''),
-        shortCode,
-        createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
-        status: 'active',
-      };
-    });
+    const newLinks = valid.map((v) => ({
+      vendorName: v.name,
+      pan: v.pan,
+      email: v.email,
+      link: generateEncryptedLink(v.pan, ''),
+      shortCode: generateShortCode(),
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+      status: 'active',
+    }));
 
     try {
-      await addLinks(newLinks);
-      setMultiPanInput('');
-      showToast(`${newLinks.length} links generated successfully!`);
+      setSending(true);
+      const created = await addLinks(newLinks);
+      setRows([{ ...EMPTY_ROW }]);
+
+      // Send emails
+      const emailResults = await sendEmails(created);
+      if (emailResults.failed > 0) {
+        showToast(`${created.length} link(s) generated. Emails: ${emailResults.sent} sent, ${emailResults.failed} failed.`);
+      } else {
+        showToast(`${created.length} link(s) generated and emailed successfully!`);
+      }
     } catch (err) {
       setErrors([`Failed to generate links: ${err.message}`]);
+    } finally {
+      setSending(false);
     }
   };
 
+  // ── Excel upload ──
   const handleExcelUpload = (e) => {
     setErrors([]);
     const file = e.target.files[0];
@@ -132,40 +170,53 @@ export default function GenerateLink() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-        const pans = [];
+        const parsed = [];
         const errs = [];
 
         data.forEach((row, i) => {
-          const cell = (row[0] || '').toString().toUpperCase().trim();
-          if (!cell || i === 0) return;
-          if (!validatePAN(cell)) {
-            errs.push(`Row ${i + 1}: "${cell}" is not a valid PAN`);
-          } else if (links.find((l) => l.pan === cell && l.status !== 'submitted' && !isExpired(l.expiresAt))) {
-            errs.push(`"${cell}" already has an active link`);
-          } else if (pans.includes(cell)) {
-            errs.push(`"${cell}" is duplicated in file`);
-          } else {
-            pans.push(cell);
+          if (i === 0) return; // skip header
+          const name = (row[0] || '').toString().trim();
+          const pan = (row[1] || '').toString().toUpperCase().trim();
+          const email = (row[2] || '').toString().trim();
+          if (!name && !pan && !email) return; // skip empty rows
+
+          const line = `Row ${i + 1}`;
+          if (!name) { errs.push(`${line}: Name is empty`); return; }
+          if (!pan) { errs.push(`${line}: PAN is empty`); return; }
+          if (!validatePAN(pan)) { errs.push(`${line}: "${pan}" is not a valid PAN`); return; }
+          if (!email) { errs.push(`${line}: Email is empty`); return; }
+          if (links.find((l) => l.pan === pan && l.status !== 'submitted' && !isExpired(l.expiresAt))) {
+            errs.push(`${line}: "${pan}" already has an active link`); return;
           }
+          if (parsed.find((p) => p.pan === pan)) { errs.push(`${line}: "${pan}" duplicated`); return; }
+          parsed.push({ name, pan, email });
         });
 
         if (errs.length > 0) setErrors(errs);
 
-        if (pans.length > 0) {
-          const newLinks = pans.map((pan) => {
-            const shortCode = generateShortCode();
-            return {
-              pan,
-              link: generateEncryptedLink(pan, ''),
-              shortCode,
-              createdAt: new Date().toISOString(),
-              expiresAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
-              status: 'active',
-            };
-          });
+        if (parsed.length > 0) {
+          const newLinks = parsed.map((v) => ({
+            vendorName: v.name,
+            pan: v.pan,
+            email: v.email,
+            link: generateEncryptedLink(v.pan, ''),
+            shortCode: generateShortCode(),
+            createdAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+            status: 'active',
+          }));
+          setSending(true);
           addLinks(newLinks)
-            .then(() => showToast(`${newLinks.length} links generated from Excel!`))
-            .catch((err) => setErrors((prev) => [...prev, `Failed to save links: ${err.message}`]));
+            .then(async (created) => {
+              const emailResults = await sendEmails(created);
+              if (emailResults.failed > 0) {
+                showToast(`${created.length} links generated. Emails: ${emailResults.sent} sent, ${emailResults.failed} failed.`);
+              } else {
+                showToast(`${created.length} links generated and emailed!`);
+              }
+            })
+            .catch((err) => setErrors((prev) => [...prev, `Failed: ${err.message}`]))
+            .finally(() => setSending(false));
         }
       } catch {
         setErrors(['Failed to read Excel file. Please check the format.']);
@@ -191,36 +242,55 @@ export default function GenerateLink() {
         <h1>Generate Vendor Links</h1>
       </div>
 
-      {/* Input Panel — compact, no scroll */}
+      {/* Input Panel */}
       <div className="card" style={{ marginBottom: '10px', flexShrink: 0 }}>
         <div className="tabs">
-          <button
-            className={`tab ${activeTab === 'multiple' ? 'active' : ''}`}
-            onClick={() => { setActiveTab('multiple'); setErrors([]); }}
-          >
-            Multiple Input
+          <button className={`tab ${activeTab === 'manual' ? 'active' : ''}`} onClick={() => { setActiveTab('manual'); setErrors([]); }}>
+            Manual Input
           </button>
-          <button
-            className={`tab ${activeTab === 'excel' ? 'active' : ''}`}
-            onClick={() => { setActiveTab('excel'); setErrors([]); }}
-          >
+          <button className={`tab ${activeTab === 'excel' ? 'active' : ''}`} onClick={() => { setActiveTab('excel'); setErrors([]); }}>
             Excel Upload
           </button>
         </div>
 
-        {activeTab === 'multiple' && (
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-            <textarea
-              className={`form-control ${errors.length ? 'error' : ''}`}
-              value={multiPanInput}
-              onChange={(e) => setMultiPanInput(e.target.value.toUpperCase())}
-              placeholder={"ABCDE1234F, BCDEF2345G, CDEFG3456H (comma or newline separated)"}
-              rows={2}
-              style={{ flex: 1, resize: 'vertical', minHeight: '50px', maxHeight: '120px' }}
-            />
-            <button className="btn btn-primary" onClick={handleMultipleAdd} style={{ whiteSpace: 'nowrap', alignSelf: 'flex-end' }}>
-              Generate Links
-            </button>
+        {activeTab === 'manual' && (
+          <div>
+            <div style={{ maxHeight: '160px', overflowY: 'auto', marginBottom: '10px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: '11px', color: 'var(--gray-600)', fontWeight: '600' }}>Name <span style={{ color: 'var(--danger)' }}>*</span></th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: '11px', color: 'var(--gray-600)', fontWeight: '600', width: '140px' }}>PAN <span style={{ color: 'var(--danger)' }}>*</span></th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px', fontSize: '11px', color: 'var(--gray-600)', fontWeight: '600' }}>Email <span style={{ color: 'var(--danger)' }}>*</span></th>
+                    <th style={{ width: '32px' }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <tr key={i}>
+                      <td style={{ padding: '3px 4px' }}>
+                        <input className="form-control" value={row.name} onChange={(e) => updateRow(i, 'name', e.target.value)} placeholder="Vendor name" style={{ padding: '6px 8px', fontSize: '13px' }} />
+                      </td>
+                      <td style={{ padding: '3px 4px' }}>
+                        <input className="form-control" value={row.pan} onChange={(e) => updateRow(i, 'pan', e.target.value)} placeholder="ABCDE1234F" maxLength={10} style={{ padding: '6px 8px', fontSize: '13px' }} />
+                      </td>
+                      <td style={{ padding: '3px 4px' }}>
+                        <input className="form-control" value={row.email} onChange={(e) => updateRow(i, 'email', e.target.value)} placeholder="email@example.com" type="email" style={{ padding: '6px 8px', fontSize: '13px' }} />
+                      </td>
+                      <td style={{ padding: '3px 4px' }}>
+                        <button onClick={() => removeRow(i)} style={{ background: 'none', border: 'none', color: 'var(--gray-400)', cursor: 'pointer', fontSize: '16px', padding: '2px' }}>✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <button className="btn btn-sm btn-outline" onClick={addRow}>+ Add Row</button>
+              <button className="btn btn-sm btn-primary" onClick={handleGenerate} disabled={sending}>
+                {sending ? 'Generating & Sending...' : 'Generate & Send Links'}
+              </button>
+            </div>
           </div>
         )}
 
@@ -231,15 +301,9 @@ export default function GenerateLink() {
             </button>
             <label className="btn btn-sm btn-primary" style={{ whiteSpace: 'nowrap', cursor: 'pointer', margin: 0 }}>
               Upload Excel
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                onChange={handleExcelUpload}
-                style={{ display: 'none' }}
-              />
+              <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={handleExcelUpload} style={{ display: 'none' }} />
             </label>
-            <span style={{ fontSize: '12px', color: 'var(--gray-500)' }}>Download template, fill PAN numbers in Column A, then upload (.xlsx, .xls)</span>
+            <span style={{ fontSize: '12px', color: 'var(--gray-500)' }}>Template columns: Name, PAN, Email</span>
           </div>
         )}
 
@@ -252,7 +316,7 @@ export default function GenerateLink() {
         )}
       </div>
 
-      {/* Generated Links Table — fills remaining height */}
+      {/* Generated Links Table */}
       <div className="card" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div className="card-header" style={{ flexShrink: 0 }}>
           <h2>Generated Links ({links.length})</h2>
@@ -266,7 +330,9 @@ export default function GenerateLink() {
             <table>
               <thead>
                 <tr>
-                  <th>PAN Number</th>
+                  <th>Name</th>
+                  <th>PAN</th>
+                  <th>Email</th>
                   <th>Link</th>
                   <th>Created</th>
                   <th>Expires</th>
@@ -275,19 +341,21 @@ export default function GenerateLink() {
                 </tr>
               </thead>
               <tbody>
-                {[...links].reverse().map((item) => {
+                {[...links].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((item) => {
                   const expired = isExpired(item.expiresAt);
                   const status = item.status === 'submitted' ? 'submitted' : expired ? 'expired' : 'active';
                   return (
                     <tr key={item.id} style={{ cursor: 'default' }}>
+                      <td>{item.vendorName || '-'}</td>
                       <td><strong>{item.pan}</strong></td>
+                      <td style={{ fontSize: '13px' }}>{item.email || '-'}</td>
                       <td>
                         {item.shortCode ? (
                           <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: '500' }}>
                             /v/{item.shortCode}
                           </span>
                         ) : (
-                          <span style={{ fontSize: '11px', color: 'var(--gray-400)' }}>Legacy link</span>
+                          <span style={{ fontSize: '11px', color: 'var(--gray-400)' }}>Legacy</span>
                         )}
                       </td>
                       <td>{new Date(item.createdAt).toLocaleDateString()}</td>

@@ -11,7 +11,9 @@ import { getSupabaseClient, isSupabaseConfigured } from './supabase';
 // Map: JS camelCase field → DB snake_case column
 const LINK_FIELDS = {
   id: 'id',
+  vendorName: 'vendor_name',
   pan: 'pan',
+  email: 'email',
   link: 'link',
   shortCode: 'short_code',
   status: 'status',
@@ -34,6 +36,7 @@ const SUBMISSION_FIELDS = {
   contactEmail: 'contact_email',
   tan: 'tan',
   gstNo: 'gst_no',
+  gstRegType: 'gst_reg_type',
   gstNotRegistered: 'gst_not_registered',
   goodsSent: 'goods_sent',
   lutNo: 'lut_no',

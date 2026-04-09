@@ -90,6 +90,7 @@ function FormContent() {
     pan: '',
     tan: '',
     gstNo: '',
+    gstRegType: '',
     gstNotRegistered: false,
     goodsSent: false,
     lutNo: '',
@@ -108,6 +109,7 @@ function FormContent() {
   const [attachType, setAttachType] = useState('PAN Card');
   const [draftRestored, setDraftRestored] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [consent, setConsent] = useState(false);
 
   // Restore cached draft for non-confidential fields
   useEffect(() => {
@@ -174,6 +176,7 @@ function FormContent() {
       // When GST not registered is checked → clear GST fields
       if (field === 'gstNotRegistered' && value === true) {
         updated.gstNo = '';
+        updated.gstRegType = '';
         updated.goodsSent = false;
         updated.lutNo = '';
         updated.lutYear = '';
@@ -350,6 +353,7 @@ function FormContent() {
 
     // ── GST (conditional) ──
     if (!form.gstNotRegistered) {
+      if (!form.gstRegType) errs.gstRegType = 'Type of Registration is required';
       if (!form.gstNo.trim()) errs.gstNo = 'GST No. is required (or mark as not registered)';
       else if (!isValidGST(form.gstNo)) errs.gstNo = 'Enter valid 15-digit GST number (no special characters)';
 
@@ -467,7 +471,7 @@ function FormContent() {
       return (
         <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}>
           <div className="card" style={{ maxWidth: '520px', width: '100%', textAlign: 'center' }}>
-            <div style={{ fontSize: '56px', marginBottom: '16px' }}>⏰</div>
+            <img src="/LogoSys.jpg" alt="KBS Logo" style={{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'contain', marginBottom: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }} />
             <h1 style={{ fontSize: '22px', marginBottom: '10px', color: 'var(--warning)' }}>Link Expired</h1>
             <p style={{ color: 'var(--gray-700)', fontSize: '15px', marginBottom: '12px' }}>
               This KYC form link has expired and is no longer valid.
@@ -491,7 +495,7 @@ function FormContent() {
       return (
         <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}>
           <div className="card" style={{ maxWidth: '520px', width: '100%', textAlign: 'center' }}>
-            <div style={{ fontSize: '56px', marginBottom: '16px' }}>📋</div>
+            <img src="/LogoSys.jpg" alt="KBS Logo" style={{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'contain', marginBottom: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }} />
             <h1 style={{ fontSize: '22px', marginBottom: '10px', color: 'var(--primary)' }}>Already Submitted</h1>
             <p style={{ color: 'var(--gray-700)', fontSize: '15px', marginBottom: '12px' }}>
               The KYC form for this PAN number has already been submitted.
@@ -509,7 +513,7 @@ function FormContent() {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}>
         <div className="card" style={{ maxWidth: '520px', width: '100%', textAlign: 'center' }}>
-          <div style={{ fontSize: '56px', marginBottom: '16px' }}>🚫</div>
+          <img src="/LogoSys.jpg" alt="KBS Logo" style={{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'contain', marginBottom: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }} />
           <h1 style={{ fontSize: '22px', marginBottom: '10px', color: 'var(--danger)' }}>Access Denied</h1>
           <p style={{ color: 'var(--gray-700)', fontSize: '15px', marginBottom: '12px' }}>
             {tokenError}
@@ -536,12 +540,31 @@ function FormContent() {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gray-50)' }}>
         <div className="card" style={{ maxWidth: '520px', width: '100%', textAlign: 'center' }}>
-          <div style={{ fontSize: '48px', marginBottom: '16px' }}>✅</div>
+          <img src="/LogoSys.jpg" alt="KBS Logo" style={{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'contain', marginBottom: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }} />
           <h1 style={{ fontSize: '22px', marginBottom: '8px', color: 'var(--success)' }}>KYC Submitted Successfully!</h1>
           <p style={{ color: 'var(--gray-600)' }}>
             Your KYC form has been submitted to KBS for review. The admin will review your submission and update the status.
             This link is now expired.
           </p>
+          <div style={{ marginTop: '20px', padding: '16px', background: 'var(--primary-light)', borderRadius: 'var(--radius)', border: '1px solid var(--primary)' }}>
+            <p style={{ fontSize: '14px', color: 'var(--gray-800)', marginBottom: '4px' }}>
+              <strong>Re-KYC Due In:</strong>{' '}
+              {(() => {
+                const reKycDate = new Date();
+                reKycDate.setFullYear(reKycDate.getFullYear() + 3);
+                const now = new Date();
+                const diffDays = Math.ceil((reKycDate - now) / (1000 * 60 * 60 * 24));
+                const years = Math.floor(diffDays / 365);
+                const months = Math.floor((diffDays % 365) / 30);
+                const days = diffDays % 30;
+                return `${years} year(s), ${months} month(s), ${days} day(s)`;
+              })()}
+            </p>
+            <p style={{ fontSize: '12px', color: 'var(--gray-500)', marginTop: '4px' }}>
+              Your next KYC renewal is due on{' '}
+              <strong>{(() => { const d = new Date(); d.setFullYear(d.getFullYear() + 3); return d.toLocaleDateString(); })()}</strong>
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -573,7 +596,12 @@ function FormContent() {
     <div style={{ background: 'var(--gray-50)', minHeight: '100vh', padding: '32px 16px' }}>
       <div style={{ maxWidth: '960px', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-          <h1 style={{ fontSize: '24px', fontWeight: '700' }}>KBS - Vendor KYC Form</h1>
+          <img
+            src="/LogoSys.jpg"
+            alt="KBS Logo"
+            style={{ width: '72px', height: '72px', borderRadius: '12px', objectFit: 'contain', marginBottom: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+          />
+          <h1 style={{ fontSize: '24px', fontWeight: '700' }}>Vendor KYC Form</h1>
           <p style={{ color: 'var(--gray-600)', fontSize: '14px', marginTop: '8px' }}>
             Please fill in all required details. Fields marked with <span style={{ color: 'var(--danger)' }}>*</span> are mandatory.
           </p>
@@ -671,6 +699,20 @@ function FormContent() {
             ) : (
               <>
                 <div className="form-grid">
+                  <div className="form-group">
+                    <label>Type of Registration <span className="required">*</span></label>
+                    <select
+                      className={`form-control ${errors.gstRegType ? 'error' : ''}`}
+                      value={form.gstRegType}
+                      onChange={(e) => updateField('gstRegType', e.target.value)}
+                    >
+                      <option value="">Select Type</option>
+                      <option value="Regular">Regular</option>
+                      <option value="Composition">Composition</option>
+                      <option value="SEZ">SEZ</option>
+                    </select>
+                    {errors.gstRegType && <p className="error-text">{errors.gstRegType}</p>}
+                  </div>
                   {renderField('GST No.', 'gstNo', { required: true, placeholder: 'Enter 15-digit GST number', maxLength: 15, onChangeOverride: (e) => updateField('gstNo', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')) })}
                 </div>
                 <div className="form-group" style={{ marginTop: '12px' }}>
@@ -959,12 +1001,28 @@ function FormContent() {
           </div>
         </div>
 
+        {/* Declaration & Consent */}
+        <div className="card" style={{ marginBottom: '24px', border: consent ? '1px solid var(--success)' : '1px solid var(--gray-300)' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              id="consent-checkbox"
+              style={{ marginTop: '4px', width: '18px', height: '18px', flexShrink: 0, cursor: 'pointer' }}
+            />
+            <label htmlFor="consent-checkbox" style={{ fontSize: '13px', color: 'var(--gray-700)', lineHeight: '1.6', cursor: 'pointer' }}>
+              I hereby voluntarily consent to provide my Know Your Customer (KYC) details, including identity and address proof, to <strong>KBS CREATIONS</strong> for the purpose of verification and compliance with applicable regulatory requirements. I confirm that the information and documents submitted by me are <strong>true, accurate, and up to date</strong> to the best of my knowledge.
+            </label>
+          </div>
+        </div>
+
         <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: '40px' }}>
           <button
             className="btn btn-primary"
             style={{ padding: '14px 48px', fontSize: '16px' }}
             onClick={handleSubmit}
-            disabled={submitting}
+            disabled={submitting || !consent}
           >
             {submitting ? 'Submitting...' : 'Submit KYC Form'}
           </button>

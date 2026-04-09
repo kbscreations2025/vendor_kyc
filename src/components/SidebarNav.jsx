@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
@@ -26,13 +27,22 @@ export default function SidebarNav({ user }) {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand">
-        <h2>KBS - Vendor KYC</h2>
-        {user && (
-          <p style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '4px' }}>
-            {user.name}
-          </p>
-        )}
+      <div className="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <Image
+          src="/LogoSys.jpg"
+          alt="KBS Logo"
+          width={44}
+          height={44}
+          style={{ borderRadius: '8px', objectFit: 'contain', flexShrink: 0 }}
+        />
+        <div>
+          <h2 style={{ fontSize: '16px', lineHeight: '1.2' }}>KBS - Vendor KYC</h2>
+          {user && (
+            <p style={{ fontSize: '12px', color: 'var(--gray-400)', marginTop: '2px' }}>
+              {user.name}
+            </p>
+          )}
+        </div>
       </div>
       <nav className="sidebar-nav">
         {navItems.map((item) => (
