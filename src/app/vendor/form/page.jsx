@@ -83,6 +83,7 @@ function FormContent() {
     address: '',
     city: '',
     district: '',
+    state: '',
     pinCode: '',
     contactPerson: '',
     contactNo: '',
@@ -227,6 +228,140 @@ function FormContent() {
     updateField(field, cleaned);
   };
 
+  // Pincode lookup state
+  const [pincodeLoading, setPincodeLoading] = useState(false);
+  const [pincodeError, setPincodeError] = useState('');
+  const [postOffices, setPostOffices] = useState([]);
+  const [selectedPO, setSelectedPO] = useState('');
+
+  const handlePincodeChange = async (value) => {
+    const digits = value.replace(/[^0-9]/g, '');
+    if (digits.length > 6) return;
+    updateField('pinCode', digits);
+    setPincodeError('');
+    setPostOffices([]);
+    setSelectedPO('');
+
+    if (digits.length === 6) {
+      setPincodeLoading(true);
+      try {
+        const res = await fetch(`https://api.postalpincode.in/pincode/${digits}`);
+        const data = await res.json();
+        if (data[0]?.Status === 'Success' && data[0]?.PostOffice?.length > 0) {
+          const offices = data[0].PostOffice;
+          setPostOffices(offices);
+          // Auto-select first one
+          const po = offices[0];
+          setSelectedPO(po.Name);
+          setForm((prev) => ({
+            ...prev,
+            city: po.Block && po.Block !== 'NA' ? po.Block : po.Name,
+            district: po.District,
+            state: po.State,
+          }));
+          setErrors((prev) => {
+            const next = { ...prev };
+            delete next.city;
+            delete next.district;
+            delete next.state;
+            delete next.pinCode;
+            return next;
+          });
+        } else {
+          setPincodeError('Invalid PIN code — no data found');
+          setForm((prev) => ({ ...prev, city: '', district: '', state: '' }));
+        }
+      } catch {
+        setPincodeError('Failed to fetch pincode data');
+      } finally {
+        setPincodeLoading(false);
+      }
+    } else {
+      setForm((prev) => ({ ...prev, city: '', district: '', state: '' }));
+    }
+  };
+
+  const handlePOSelect = (poName) => {
+    setSelectedPO(poName);
+    const po = postOffices.find((p) => p.Name === poName);
+    if (po) {
+      setForm((prev) => ({
+        ...prev,
+        city: po.Block && po.Block !== 'NA' ? po.Block : po.Name,
+        district: po.District,
+        state: po.State,
+      }));
+    }
+  };
+
+  // GST lookup state
+  const [gstLoading, setGstLoading] = useState(false);
+  const [gstError, setGstError] = useState('');
+  const [gstFetched, setGstFetched] = useState(false);
+
+  const handleGstChange = async (value) => {
+    const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (cleaned.length > 15) return;
+    updateField('gstNo', cleaned);
+    setGstError('');
+
+    if (cleaned.length < 15) {
+      setGstFetched(false);
+      return;
+    }
+
+    setGstLoading(true);
+    try {
+      const res = await fetch(`https://appyflow.in/api/verifyGST?gstNo=${cleaned}`);
+      const data = await res.json();
+
+      if (data && data.taxpayerInfo && data.taxpayerInfo.lgnm) {
+        const info = data.taxpayerInfo;
+        const addr = info.pradr?.addr || {};
+
+        setForm((prev) => ({
+          ...prev,
+          legalName: info.lgnm || prev.legalName,
+          tradeName: info.tradeNam || prev.tradeName,
+          address: [addr.bno, addr.bnm, addr.st, addr.loc, addr.flno].filter(Boolean).join(', ') || prev.address,
+          city: addr.dst || addr.loc || prev.city,
+          district: addr.dst || prev.district,
+          state: addr.stcd ? (info.pradr?.addr?.stcd || prev.state) : prev.state,
+          pinCode: addr.pncd || prev.pinCode,
+          gstRegType: info.dty === 'Regular' ? 'Regular' : info.dty === 'Composition' ? 'Composition' : prev.gstRegType,
+        }));
+
+        // Clear related errors
+        setErrors((prev) => {
+          const next = { ...prev };
+          delete next.legalName;
+          delete next.tradeName;
+          delete next.address;
+          delete next.city;
+          delete next.district;
+          delete next.state;
+          delete next.pinCode;
+          delete next.gstNo;
+          delete next.gstRegType;
+          return next;
+        });
+
+        setGstFetched(true);
+      } else if (data?.error) {
+        setGstError(data.error);
+        setGstFetched(false);
+      } else {
+        setGstError('Could not fetch GST details. Please fill manually.');
+        setGstFetched(false);
+      }
+    } catch {
+      setGstError('GST lookup failed. Please fill details manually.');
+      setGstFetched(false);
+    } finally {
+      setGstLoading(false);
+    }
+  };
+
   // Convert file to base64 data URL for storage & preview
   const fileToDataUrl = (file) => {
     return new Promise((resolve) => {
@@ -331,6 +466,9 @@ function FormContent() {
 
     if (!form.district.trim()) errs.district = 'District is required';
     else if (!isOnlyLettersSpaces(form.district.trim())) errs.district = 'District must contain only letters';
+
+    if (!form.state.trim()) errs.state = 'State is required';
+    else if (!isOnlyLettersSpaces(form.state.trim())) errs.state = 'State must contain only letters';
 
     if (!form.pinCode.trim()) errs.pinCode = 'PIN Code is required';
     else if (!isValidPIN(form.pinCode)) errs.pinCode = 'Enter valid 6-digit PIN code';
@@ -655,9 +793,46 @@ function FormContent() {
                 />
                 {errors.address && <p className="error-text">{errors.address}</p>}
               </div>
-              {renderField('City', 'city', { required: true, placeholder: 'Enter city', onChangeOverride: (e) => handleTextInput('city', e.target.value) })}
-              {renderField('District', 'district', { required: true, placeholder: 'Enter district', onChangeOverride: (e) => handleTextInput('district', e.target.value) })}
-              {renderField('PIN Code', 'pinCode', { required: true, placeholder: 'Enter 6-digit PIN', maxLength: 6, inputMode: 'numeric', onChangeOverride: (e) => handleNumberInput('pinCode', e.target.value, 6) })}
+              <div className="form-group">
+                <label>PIN Code <span className="required">*</span></label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    className={`form-control ${errors.pinCode || pincodeError ? 'error' : ''}`}
+                    value={form.pinCode}
+                    onChange={(e) => handlePincodeChange(e.target.value)}
+                    placeholder="Enter 6-digit PIN"
+                    maxLength={6}
+                    inputMode="numeric"
+                  />
+                  {pincodeLoading && (
+                    <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: 'var(--gray-500)' }}>
+                      Loading...
+                    </span>
+                  )}
+                </div>
+                {errors.pinCode && <p className="error-text">{errors.pinCode}</p>}
+                {pincodeError && <p className="error-text">{pincodeError}</p>}
+              </div>
+              {postOffices.length > 1 && (
+                <div className="form-group">
+                  <label>Post Office / Area <span className="required">*</span></label>
+                  <select
+                    className="form-control"
+                    value={selectedPO}
+                    onChange={(e) => handlePOSelect(e.target.value)}
+                  >
+                    {postOffices.map((po) => (
+                      <option key={po.Name} value={po.Name}>
+                        {po.Name} ({po.BranchType})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {renderField('City', 'city', { required: true, placeholder: 'Auto-filled from PIN code', disabled: !!form.city, onChangeOverride: (e) => handleTextInput('city', e.target.value) })}
+              {renderField('District', 'district', { required: true, placeholder: 'Auto-filled from PIN code', disabled: !!form.district, onChangeOverride: (e) => handleTextInput('district', e.target.value) })}
+              {renderField('State', 'state', { required: true, placeholder: 'Auto-filled from PIN code', disabled: !!form.state, onChangeOverride: (e) => handleTextInput('state', e.target.value) })}
             </div>
           </div>
 
@@ -713,7 +888,27 @@ function FormContent() {
                     </select>
                     {errors.gstRegType && <p className="error-text">{errors.gstRegType}</p>}
                   </div>
-                  {renderField('GST No.', 'gstNo', { required: true, placeholder: 'Enter 15-digit GST number', maxLength: 15, onChangeOverride: (e) => updateField('gstNo', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')) })}
+                  <div className="form-group">
+                    <label>GST No. <span className="required">*</span></label>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="text"
+                        className={`form-control ${errors.gstNo || gstError ? 'error' : gstFetched ? 'success' : ''}`}
+                        value={form.gstNo}
+                        onChange={(e) => handleGstChange(e.target.value)}
+                        placeholder="Enter 15-digit GST number"
+                        maxLength={15}
+                      />
+                      {gstLoading && (
+                        <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: 'var(--gray-500)' }}>
+                          Fetching...
+                        </span>
+                      )}
+                    </div>
+                    {errors.gstNo && <p className="error-text">{errors.gstNo}</p>}
+                    {gstError && <p className="error-text">{gstError}</p>}
+                    {gstFetched && <p style={{ fontSize: '12px', color: 'var(--success)', marginTop: '4px' }}>Vendor details auto-filled from GST</p>}
+                  </div>
                 </div>
                 <div className="form-group" style={{ marginTop: '12px' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>

@@ -318,67 +318,70 @@ export default function GenerateLink() {
 
       {/* Generated Links Table */}
       <div className="card" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div className="card-header" style={{ flexShrink: 0 }}>
-          <h2>Generated Links ({links.length})</h2>
-        </div>
-        {links.length === 0 ? (
-          <p style={{ color: 'var(--gray-500)', textAlign: 'center', padding: '40px' }}>
-            No links generated yet. Use the form above to create vendor KYC links.
-          </p>
-        ) : (
-          <div className="table-wrapper" style={{ flex: 1, maxHeight: 'none' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>PAN</th>
-                  <th>Email</th>
-                  <th>Link</th>
-                  <th>Created</th>
-                  <th>Expires</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...links].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((item) => {
-                  const expired = isExpired(item.expiresAt);
-                  const status = item.status === 'submitted' ? 'submitted' : expired ? 'expired' : 'active';
-                  return (
-                    <tr key={item.id} style={{ cursor: 'default' }}>
-                      <td>{item.vendorName || '-'}</td>
-                      <td><strong>{item.pan}</strong></td>
-                      <td style={{ fontSize: '13px' }}>{item.email || '-'}</td>
-                      <td>
-                        {item.shortCode ? (
-                          <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: '500' }}>
-                            /v/{item.shortCode}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: '11px', color: 'var(--gray-400)' }}>Legacy</span>
-                        )}
-                      </td>
-                      <td>{new Date(item.createdAt).toLocaleDateString()}</td>
-                      <td>{new Date(item.expiresAt).toLocaleDateString()}</td>
-                      <td>
-                        <span className={`badge badge-${status}`}>{status}</span>
-                      </td>
-                      <td>
-                        <button
-                          className={`copy-btn ${copiedId === item.id ? 'copied' : ''}`}
-                          onClick={() => copyToClipboard(item.shortCode, item.id)}
-                          disabled={expired || item.status === 'submitted' || !item.shortCode}
-                        >
-                          {copiedId === item.id ? 'Copied!' : 'Copy Link'}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {(() => {
+          const activeLinks = links.filter((item) => item.status !== 'submitted' && !isExpired(item.expiresAt));
+          return (
+            <>
+              <div className="card-header" style={{ flexShrink: 0 }}>
+                <h2>Active Links ({activeLinks.length})</h2>
+              </div>
+              {activeLinks.length === 0 ? (
+                <p style={{ color: 'var(--gray-500)', textAlign: 'center', padding: '40px' }}>
+                  No active links. Expired and submitted links are automatically removed from this list.
+                </p>
+              ) : (
+                <div className="table-wrapper" style={{ flex: 1, maxHeight: 'none' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>PAN</th>
+                        <th>Email</th>
+                        <th>Link</th>
+                        <th>Created</th>
+                        <th>Expires</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...activeLinks].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((item) => (
+                        <tr key={item.id} style={{ cursor: 'default' }}>
+                          <td>{item.vendorName || '-'}</td>
+                          <td><strong>{item.pan}</strong></td>
+                          <td style={{ fontSize: '13px' }}>{item.email || '-'}</td>
+                          <td>
+                            {item.shortCode ? (
+                              <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: '500' }}>
+                                /v/{item.shortCode}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '11px', color: 'var(--gray-400)' }}>Legacy</span>
+                            )}
+                          </td>
+                          <td>{new Date(item.createdAt).toLocaleDateString()}</td>
+                          <td>{new Date(item.expiresAt).toLocaleDateString()}</td>
+                          <td>
+                            <span className="badge badge-active">active</span>
+                          </td>
+                          <td>
+                            <button
+                              className={`copy-btn ${copiedId === item.id ? 'copied' : ''}`}
+                              onClick={() => copyToClipboard(item.shortCode, item.id)}
+                              disabled={!item.shortCode}
+                            >
+                              {copiedId === item.id ? 'Copied!' : 'Copy Link'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {toast && <div className="toast">{toast}</div>}
