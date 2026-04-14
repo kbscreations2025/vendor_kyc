@@ -30,6 +30,7 @@ const SUBMISSION_FIELDS = {
   address: 'address',
   city: 'city',
   district: 'district',
+  state: 'state',
   pinCode: 'pin_code',
   contactPerson: 'contact_person',
   contactNo: 'contact_no',

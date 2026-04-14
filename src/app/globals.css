@@ -100,6 +100,7 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--gray-300);
   border-radius: var(--radius);
   font-size: 14px;
+  font-family: inherit;
   transition: border-color 0.2s;
   background: var(--white);
 }
