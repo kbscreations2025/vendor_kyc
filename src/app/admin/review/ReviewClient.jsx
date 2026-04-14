@@ -418,28 +418,6 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
             <div className="modal-body">
               <div style={{ marginBottom: '16px' }}>
                 <span className={`badge badge-${selectedSubmission.status}`}>{selectedSubmission.status}</span>
-                {(() => {
-                  const submitted = new Date(selectedSubmission.submittedAt);
-                  const reKycDate = new Date(submitted);
-                  reKycDate.setFullYear(reKycDate.getFullYear() + 3);
-                  const now = new Date();
-                  const diffDays = Math.ceil((reKycDate - now) / (1000 * 60 * 60 * 24));
-                  const isOverdue = diffDays <= 0;
-                  const isWarning = diffDays > 0 && diffDays <= 90;
-                  const color = isOverdue ? 'var(--danger)' : isWarning ? 'var(--warning)' : 'var(--primary)';
-                  const years = Math.floor(Math.abs(diffDays) / 365);
-                  const months = Math.floor((Math.abs(diffDays) % 365) / 30);
-                  const days = Math.abs(diffDays) % 30;
-                  const parts = [];
-                  if (years) parts.push(`${years}y`);
-                  if (months) parts.push(`${months}m`);
-                  if (days) parts.push(`${days}d`);
-                  return (
-                    <span style={{ marginLeft: '10px', fontSize: '13px', color, fontWeight: 600 }}>
-                      Re-KYC: {isOverdue ? `Overdue by ${parts.join(' ')}` : `Due in ${parts.join(' ')}`} ({reKycDate.toLocaleDateString()})
-                    </span>
-                  );
-                })()}
               </div>
 
               <h3 style={{ fontSize: '15px', marginBottom: '12px', color: 'var(--gray-700)' }}>Basic Information</h3>
