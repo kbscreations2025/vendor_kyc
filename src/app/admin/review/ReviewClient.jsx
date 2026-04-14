@@ -59,11 +59,12 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
 
   // Column filters
   const [filters, setFilters] = useState({
-    vendorName: '',
+    vendorOrTrade: '',
     pan: '',
-    tradeName: '',
-    address: '',
-    contactNo: '',
+    gstNo: '',
+    msmeNo: '',
+    msmeCategory: 'all',
+    activity: '',
     dateRange: 'all',
     dateFrom: '',
     dateTo: '',
@@ -120,20 +121,28 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
   const sorted = useMemo(() => {
     let result = optimisticSubmissions;
 
-    if (filters.vendorName) {
-      result = result.filter((s) => (s.vendorName || '').toLowerCase().includes(filters.vendorName.toLowerCase()));
+    if (filters.vendorOrTrade) {
+      const q = filters.vendorOrTrade.toLowerCase();
+      result = result.filter((s) =>
+        (s.vendorName || '').toLowerCase().includes(q) ||
+        (s.tradeName || '').toLowerCase().includes(q) ||
+        (s.legalName || '').toLowerCase().includes(q)
+      );
     }
     if (filters.pan) {
       result = result.filter((s) => (s.pan || '').toLowerCase().includes(filters.pan.toLowerCase()));
     }
-    if (filters.tradeName) {
-      result = result.filter((s) => (s.tradeName || '').toLowerCase().includes(filters.tradeName.toLowerCase()));
+    if (filters.gstNo) {
+      result = result.filter((s) => (s.gstNo || '').toLowerCase().includes(filters.gstNo.toLowerCase()));
     }
-    if (filters.address) {
-      result = result.filter((s) => getFullAddress(s).toLowerCase().includes(filters.address.toLowerCase()));
+    if (filters.msmeNo) {
+      result = result.filter((s) => (s.msmeNo || '').toLowerCase().includes(filters.msmeNo.toLowerCase()));
     }
-    if (filters.contactNo) {
-      result = result.filter((s) => (s.contactNo || '').includes(filters.contactNo));
+    if (filters.msmeCategory !== 'all') {
+      result = result.filter((s) => (s.msmeCategory || '') === filters.msmeCategory);
+    }
+    if (filters.activity) {
+      result = result.filter((s) => (s.activity || '').toLowerCase().includes(filters.activity.toLowerCase()));
     }
 
     // Date range filter
@@ -181,12 +190,12 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
   }, [optimisticSubmissions, filters]);
 
   const hasActiveFilters = Object.entries(filters).some(([k, v]) => {
-    if (k === 'status' || k === 'dateRange' || k === 'reKyc') return v !== 'all';
+    if (k === 'status' || k === 'dateRange' || k === 'reKyc' || k === 'msmeCategory') return v !== 'all';
     return v !== '';
   });
 
   const clearFilters = () => {
-    setFilters({ vendorName: '', pan: '', tradeName: '', address: '', contactNo: '', dateRange: 'all', dateFrom: '', dateTo: '', status: 'all', reKyc: 'all' });
+    setFilters({ vendorOrTrade: '', pan: '', gstNo: '', msmeNo: '', msmeCategory: 'all', activity: '', dateRange: 'all', dateFrom: '', dateTo: '', status: 'all', reKyc: 'all' });
   };
 
   const openReview = async (submission) => {
@@ -331,46 +340,29 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
               <thead>
                 <tr>
                   <th>Sr.</th>
-                  <th>Vendor Name</th>
+                  <th>Vendor / Trade Name</th>
                   <th>PAN</th>
-                  <th>Trade Name</th>
-                  <th>Address</th>
-                  <th>Contact</th>
-                  <th>Submitted</th>
-                  <th>Re-KYC In</th>
+                  <th>GST No.</th>
+                  <th>MSME No.</th>
+                  <th>MSME Category</th>
+                  <th>Activity</th>
                   <th>Status</th>
                 </tr>
                 <tr className="filter-row">
                   <th></th>
-                  <th><input placeholder="Filter..." value={filters.vendorName} onChange={(e) => updateFilter('vendorName', e.target.value)} /></th>
+                  <th><input placeholder="Search name..." value={filters.vendorOrTrade} onChange={(e) => updateFilter('vendorOrTrade', e.target.value)} /></th>
                   <th><input placeholder="Filter..." value={filters.pan} onChange={(e) => updateFilter('pan', e.target.value)} /></th>
-                  <th><input placeholder="Filter..." value={filters.tradeName} onChange={(e) => updateFilter('tradeName', e.target.value)} /></th>
-                  <th><input placeholder="Search address..." value={filters.address} onChange={(e) => updateFilter('address', e.target.value)} /></th>
-                  <th><input placeholder="Filter..." value={filters.contactNo} onChange={(e) => updateFilter('contactNo', e.target.value)} /></th>
-                  <th style={{ minWidth: '140px' }}>
-                    <select value={filters.dateRange} onChange={(e) => updateFilter('dateRange', e.target.value)}>
-                      <option value="all">All Time</option>
-                      <option value="last1m">Last 1 Month</option>
-                      <option value="last2m">Last 2 Months</option>
-                      <option value="last3m">Last 3 Months</option>
-                      <option value="custom">Custom Range</option>
-                    </select>
-                    {filters.dateRange === 'custom' && (
-                      <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-                        <input type="date" value={filters.dateFrom} onChange={(e) => updateFilter('dateFrom', e.target.value)} style={{ flex: 1 }} />
-                        <input type="date" value={filters.dateTo} onChange={(e) => updateFilter('dateTo', e.target.value)} style={{ flex: 1 }} />
-                      </div>
-                    )}
-                  </th>
+                  <th><input placeholder="Filter..." value={filters.gstNo} onChange={(e) => updateFilter('gstNo', e.target.value)} /></th>
+                  <th><input placeholder="Filter..." value={filters.msmeNo} onChange={(e) => updateFilter('msmeNo', e.target.value)} /></th>
                   <th>
-                    <select value={filters.reKyc} onChange={(e) => updateFilter('reKyc', e.target.value)}>
+                    <select value={filters.msmeCategory} onChange={(e) => updateFilter('msmeCategory', e.target.value)}>
                       <option value="all">All</option>
-                      <option value="expired">Expired</option>
-                      <option value="90days">Within 90 Days</option>
-                      <option value="1year">Within 1 Year</option>
-                      <option value="2year">Within 2 Years</option>
+                      <option value="Micro">Micro</option>
+                      <option value="Small">Small</option>
+                      <option value="Medium">Medium</option>
                     </select>
                   </th>
+                  <th><input placeholder="Filter..." value={filters.activity} onChange={(e) => updateFilter('activity', e.target.value)} /></th>
                   <th>
                     <select value={filters.status} onChange={(e) => updateFilter('status', e.target.value)}>
                       <option value="all">All</option>
@@ -385,7 +377,7 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
               <tbody>
                 {sorted.length === 0 ? (
                   <tr>
-                    <td colSpan={9} style={{ textAlign: 'center', padding: '30px', color: 'var(--gray-500)' }}>
+                    <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--gray-500)' }}>
                       No submissions match your filters.
                     </td>
                   </tr>
@@ -393,31 +385,17 @@ export default function ReviewClient({ submissions: serverSubmissions }) {
                   sorted.map((s, i) => (
                     <tr key={s.id} onClick={() => openReview(s)}>
                       <td>{i + 1}</td>
-                      <td><strong>{s.vendorName}</strong></td>
-                      <td>{s.pan}</td>
-                      <td>{s.tradeName || '-'}</td>
-                      <td style={{ fontSize: '13px', maxWidth: '220px' }}>{getFullAddress(s) || '-'}</td>
-                      <td>{s.contactNo || '-'}</td>
-                      <td>{new Date(s.submittedAt).toLocaleDateString()}</td>
                       <td>
-                        {(() => {
-                          const submitted = new Date(s.submittedAt);
-                          const reKycDate = new Date(submitted);
-                          reKycDate.setFullYear(reKycDate.getFullYear() + 3);
-                          const now = new Date();
-                          const diffDays = Math.ceil((reKycDate - now) / (1000 * 60 * 60 * 24));
-                          if (diffDays <= 0) return <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Overdue</span>;
-                          if (diffDays <= 90) return <span style={{ color: 'var(--warning)', fontWeight: 600 }}>{diffDays} days</span>;
-                          const years = Math.floor(diffDays / 365);
-                          const months = Math.floor((diffDays % 365) / 30);
-                          const days = diffDays % 30;
-                          const parts = [];
-                          if (years) parts.push(`${years}y`);
-                          if (months) parts.push(`${months}m`);
-                          if (days) parts.push(`${days}d`);
-                          return <span style={{ color: 'var(--success)' }}>{parts.join(' ')}</span>;
-                        })()}
+                        <strong>{s.vendorName || '-'}</strong>
+                        {s.tradeName && s.tradeName !== s.vendorName && (
+                          <span style={{ color: 'var(--gray-500)' }}> ({s.tradeName})</span>
+                        )}
                       </td>
+                      <td>{s.pan || '-'}</td>
+                      <td>{s.gstNotRegistered ? <span style={{ fontSize: '12px', color: 'var(--gray-500)' }}>Not Registered</span> : (s.gstNo || '-')}</td>
+                      <td>{s.msmeNotRegistered ? <span style={{ fontSize: '12px', color: 'var(--gray-500)' }}>Not Registered</span> : (s.msmeNo || '-')}</td>
+                      <td>{s.msmeCategory || '-'}</td>
+                      <td style={{ fontSize: '13px', maxWidth: '180px' }}>{s.activity || '-'}</td>
                       <td>
                         <span className={`badge badge-${s.status}`}>{s.status}</span>
                       </td>

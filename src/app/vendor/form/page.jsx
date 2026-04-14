@@ -540,6 +540,21 @@ function FormContent() {
       clearDraft();
       setSubmitted(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      // Notify admin via email (fire-and-forget — don't block user on failure)
+      fetch('/api/notify-submission', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendorName: submission.vendorName,
+          pan: submission.pan,
+          tradeName: submission.tradeName,
+          contactEmail: submission.contactEmail,
+          contactNo: submission.contactNo,
+          submittedAt: submission.submittedAt,
+          reviewUrl: `${window.location.origin}/admin/review`,
+        }),
+      }).catch((err) => console.error('Admin notification failed:', err));
     } catch (err) {
       alert('Failed to submit form. Please try again.');
       console.error('Submission error:', err);
