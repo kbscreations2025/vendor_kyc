@@ -19,6 +19,9 @@ const ATTACHMENT_TYPES = [
 function isOnlyLettersSpaces(val) {
   return /^[A-Za-z\s]+$/.test(val);
 }
+function isValidPlaceName(val) {
+  return /^[A-Za-z0-9\s.\-()&,']+$/.test(val);
+}
 function isValidEmail(val) {
   return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(val.trim());
 }
@@ -228,11 +231,18 @@ function FormContent() {
     updateField(field, cleaned);
   };
 
+  // Allow letters, numbers, spaces, and common punctuation for place names
+  const handlePlaceInput = (field, value) => {
+    const cleaned = value.replace(/[^A-Za-z0-9\s.\-()&,']/g, '');
+    updateField(field, cleaned);
+  };
+
   // Pincode lookup state
   const [pincodeLoading, setPincodeLoading] = useState(false);
   const [pincodeError, setPincodeError] = useState('');
   const [postOffices, setPostOffices] = useState([]);
   const [selectedPO, setSelectedPO] = useState('');
+  const [addressPrefilled, setAddressPrefilled] = useState(false);
 
   const handlePincodeChange = async (value) => {
     const digits = value.replace(/[^0-9]/g, '');
@@ -241,6 +251,7 @@ function FormContent() {
     setPincodeError('');
     setPostOffices([]);
     setSelectedPO('');
+    setAddressPrefilled(false);
 
     if (digits.length === 6) {
       setPincodeLoading(true);
@@ -267,6 +278,7 @@ function FormContent() {
             delete next.pinCode;
             return next;
           });
+          setAddressPrefilled(true);
         } else {
           setPincodeError('Invalid PIN code — no data found');
           setForm((prev) => ({ ...prev, city: '', district: '', state: '' }));
@@ -291,74 +303,6 @@ function FormContent() {
         district: po.District,
         state: po.State,
       }));
-    }
-  };
-
-  // GST lookup state
-  const [gstLoading, setGstLoading] = useState(false);
-  const [gstError, setGstError] = useState('');
-  const [gstFetched, setGstFetched] = useState(false);
-
-  const handleGstChange = async (value) => {
-    const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (cleaned.length > 15) return;
-    updateField('gstNo', cleaned);
-    setGstError('');
-
-    if (cleaned.length < 15) {
-      setGstFetched(false);
-      return;
-    }
-
-    setGstLoading(true);
-    try {
-      const res = await fetch(`https://appyflow.in/api/verifyGST?gstNo=${cleaned}`);
-      const data = await res.json();
-
-      if (data && data.taxpayerInfo && data.taxpayerInfo.lgnm) {
-        const info = data.taxpayerInfo;
-        const addr = info.pradr?.addr || {};
-
-        setForm((prev) => ({
-          ...prev,
-          legalName: info.lgnm || prev.legalName,
-          tradeName: info.tradeNam || prev.tradeName,
-          address: [addr.bno, addr.bnm, addr.st, addr.loc, addr.flno].filter(Boolean).join(', ') || prev.address,
-          city: addr.dst || addr.loc || prev.city,
-          district: addr.dst || prev.district,
-          state: addr.stcd ? (info.pradr?.addr?.stcd || prev.state) : prev.state,
-          pinCode: addr.pncd || prev.pinCode,
-          gstRegType: info.dty === 'Regular' ? 'Regular' : info.dty === 'Composition' ? 'Composition' : prev.gstRegType,
-        }));
-
-        // Clear related errors
-        setErrors((prev) => {
-          const next = { ...prev };
-          delete next.legalName;
-          delete next.tradeName;
-          delete next.address;
-          delete next.city;
-          delete next.district;
-          delete next.state;
-          delete next.pinCode;
-          delete next.gstNo;
-          delete next.gstRegType;
-          return next;
-        });
-
-        setGstFetched(true);
-      } else if (data?.error) {
-        setGstError(data.error);
-        setGstFetched(false);
-      } else {
-        setGstError('Could not fetch GST details. Please fill manually.');
-        setGstFetched(false);
-      }
-    } catch {
-      setGstError('GST lookup failed. Please fill details manually.');
-      setGstFetched(false);
-    } finally {
-      setGstLoading(false);
     }
   };
 
@@ -462,13 +406,13 @@ function FormContent() {
     else if (form.address.trim().length < 10) errs.address = 'Address must be at least 10 characters';
 
     if (!form.city.trim()) errs.city = 'City is required';
-    else if (!isOnlyLettersSpaces(form.city.trim())) errs.city = 'City must contain only letters';
+    else if (!isValidPlaceName(form.city.trim())) errs.city = 'Invalid city name';
 
     if (!form.district.trim()) errs.district = 'District is required';
-    else if (!isOnlyLettersSpaces(form.district.trim())) errs.district = 'District must contain only letters';
+    else if (!isValidPlaceName(form.district.trim())) errs.district = 'Invalid district name';
 
     if (!form.state.trim()) errs.state = 'State is required';
-    else if (!isOnlyLettersSpaces(form.state.trim())) errs.state = 'State must contain only letters';
+    else if (!isValidPlaceName(form.state.trim())) errs.state = 'Invalid state name';
 
     if (!form.pinCode.trim()) errs.pinCode = 'PIN Code is required';
     else if (!isValidPIN(form.pinCode)) errs.pinCode = 'Enter valid 6-digit PIN code';
@@ -830,9 +774,9 @@ function FormContent() {
                   </select>
                 </div>
               )}
-              {renderField('City', 'city', { required: true, placeholder: 'Auto-filled from PIN code', disabled: !!form.city, onChangeOverride: (e) => handleTextInput('city', e.target.value) })}
-              {renderField('District', 'district', { required: true, placeholder: 'Auto-filled from PIN code', disabled: !!form.district, onChangeOverride: (e) => handleTextInput('district', e.target.value) })}
-              {renderField('State', 'state', { required: true, placeholder: 'Auto-filled from PIN code', disabled: !!form.state, onChangeOverride: (e) => handleTextInput('state', e.target.value) })}
+              {renderField('City', 'city', { required: true, placeholder: 'Auto-filled from PIN code', disabled: addressPrefilled, onChangeOverride: (e) => handlePlaceInput('city', e.target.value) })}
+              {renderField('District', 'district', { required: true, placeholder: 'Auto-filled from PIN code', disabled: addressPrefilled, onChangeOverride: (e) => handlePlaceInput('district', e.target.value) })}
+              {renderField('State', 'state', { required: true, placeholder: 'Auto-filled from PIN code', disabled: addressPrefilled, onChangeOverride: (e) => handlePlaceInput('state', e.target.value) })}
             </div>
           </div>
 
@@ -888,27 +832,7 @@ function FormContent() {
                     </select>
                     {errors.gstRegType && <p className="error-text">{errors.gstRegType}</p>}
                   </div>
-                  <div className="form-group">
-                    <label>GST No. <span className="required">*</span></label>
-                    <div style={{ position: 'relative' }}>
-                      <input
-                        type="text"
-                        className={`form-control ${errors.gstNo || gstError ? 'error' : gstFetched ? 'success' : ''}`}
-                        value={form.gstNo}
-                        onChange={(e) => handleGstChange(e.target.value)}
-                        placeholder="Enter 15-digit GST number"
-                        maxLength={15}
-                      />
-                      {gstLoading && (
-                        <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: 'var(--gray-500)' }}>
-                          Fetching...
-                        </span>
-                      )}
-                    </div>
-                    {errors.gstNo && <p className="error-text">{errors.gstNo}</p>}
-                    {gstError && <p className="error-text">{gstError}</p>}
-                    {gstFetched && <p style={{ fontSize: '12px', color: 'var(--success)', marginTop: '4px' }}>Vendor details auto-filled from GST</p>}
-                  </div>
+                  {renderField('GST No.', 'gstNo', { required: true, placeholder: 'Enter 15-digit GST number', maxLength: 15, onChangeOverride: (e) => updateField('gstNo', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '')) })}
                 </div>
                 <div className="form-group" style={{ marginTop: '12px' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
